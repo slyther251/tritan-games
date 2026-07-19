@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Daylight Tag</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+const W = 800, H = 600;
+
+// ---------- Skins you can buy in the shop ----------
+const SKINS = [
+  {key:'skin_messi',   name:'Messi',        shirt:0x75aadb, stripe:0xffffff, shorts:0x1a1a3a, hair:0x3a2412, price:0},
+  {key:'skin_neymar',  name:'Neymar',       shirt:0xffd400, stripe:0x2e8b3d, shorts:0x1a3fbf, hair:0x2a1a08, price:15},
+  {key:'skin_mbappe',  name:'Mbappe',       shirt:0x1a4fbf, stripe:null,     shorts:0xd80027, hair:0x1a1a1a, price:30},
+  {key:'skin_haaland', name:'Haaland',      shirt:0x6cabdd, stripe:null,     shorts:0xffffff, hair:0xf0e0a0, price:50},
+  {key:'skin_golden',  name:'Golden Messi', shirt:0xffd700, stripe:0xfff3a0, shorts:0x5a4a00, hair:0x3a2412, price:100},
+];
+function skinByKey(k){ return SKINS.find(s => s.key === k) || SKINS[0]; }
+
+// ---------- Save data (coins, owned skins, chosen skin) ----------
+function getCoins(){ return parseInt(localStorage.getItem('dt_coins') || '0', 10); }
+function setCoins(n){ localStorage.setItem('dt_coins', n); }
+function getOwned(){ try { return JSON.parse(localStorage.getItem('dt_owned')) || ['skin_messi']; } catch(e){ return ['skin_messi']; } }
+function setOwned(a){ localStorage.setItem('dt_owned', JSON.stringify(a)); }
+function getSelected(){ return localStorage.getItem('dt_selected') || 'skin_messi'; }
+function setSelected(k){ localStorage.setItem('dt_selected', k); }
+
+// ---------- Draw a little soccer player as a texture ----------
+function makeSkin(scene, s) {
+  const g = scene.add.graphics();
+  g.fillStyle(s.shorts, 1); g.fillRect(11, 34, 18, 10);            // shorts
+  g.fillStyle(s.shirt, 1);  g.fillRect(9, 16, 22, 20);            // shirt
+  if (s.stripe !== null) {                                         // stripes
+    g.fillStyle(s.stripe, 1);
+    g.fillRect(13, 16, 4, 20);
+    g.fillRect(23, 16, 4, 20);
+  }
+  g.fillStyle(s.shirt, 1);                                         // arms
+  g.fillRect(4, 17, 5, 14);
+  g.fillRect(31, 17, 5, 14);
+  g.fillStyle(0xf1c27d, 1); g.fillCircle(20, 9, 8);               // head
+  g.fillStyle(s.hair, 1);   g.fillRect(13, 2, 14, 5);            // hair
+  g.fillStyle(0xf1c27d, 1);                                        // legs
+  g.fillRect(13, 44, 5, 6);
+  g.fillRect(22, 44, 5, 6);
+  g.generateTexture(s.key, 40, 52);
+  g.destroy();
+}
+function ensureTextures(scene) {
+  SKINS.forEach(s => { if (!scene.textures.exists(s.key)) makeSkin(scene, s); });
+  if (!scene.textures.exists('ronaldo'))
+    makeSkin(scene, {key:'ronaldo', shirt:0xd80027, stripe:null, shorts:0x006600, hair:0x1a1a1a});
+}
+
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+  create() {
+    drawField(this);
+    ensureTextures(this);
+
+    const sel = skinByKey(getSelected());
+    this.add.image(300, 250, sel.key).setScale(2);
+    this.add.image(500, 250, 'ronaldo').setScale(2);
+    this.add.text(300, 320, sel.name + ' (you)', {font:'bold 16px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+    this.add.text(500, 320, 'RONALDO', {font:'bold 16px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+
+    this.add.text(W/2, 80, 'DAYLIGHT TAG', {font:'bold 60px Arial', color:'#ffde00', stroke:'#000', strokeThickness:8}).setOrigin(0.5);
+    this.add.text(W/2, 130, '💰 ' + getCoins() + ' coins', {font:'bold 24px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+
+    this.add.text(W/2, 385, 'Arrow Keys or WASD to move — dodge the Ronaldos!', {font:'20px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+    const start = this.add.text(W/2, 460, 'Press SPACE to Start', {font:'bold 30px Arial', color:'#fff', stroke:'#000', strokeThickness:5}).setOrigin(0.5);
+    this.tweens.add({targets: start, alpha: 0.2, duration: 600, yoyo: true, repeat: -1});
+    this.add.text(W/2, 515, 'Press S for the Skin Shop 🛒', {font:'bold 24px Arial', color:'#ffde00', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+    this.input.keyboard.once('keydown-S', () => this.scene.start('ShopScene'));
+  }
+}
+
+class ShopScene extends Phaser.Scene {
+  constructor() { super('ShopScene'); }
+  create() {
+    drawField(this);
+    ensureTextures(this);
+    this.index = 0;
+
+    this.add.text(W/2, 55, 'SKIN SHOP 🛒', {font:'bold 48px Arial', color:'#ffde00', stroke:'#000', strokeThickness:7}).setOrigin(0.5);
+    this.coinText = this.add.text(W/2, 105, '💰 ' + getCoins() + ' coins', {font:'bold 26px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+
+    const xs = [110, 265, 420, 575, 700];
+    this.cards = [];
+    SKINS.forEach((s, i) => {
+      const x = xs[i], y = 250;
+      const img = this.add.image(x, y, s.key).setScale(1.9);
+      const name = this.add.text(x, y + 55, s.name, {font:'bold 16px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+      const status = this.add.text(x, y + 82, '', {font:'bold 15px Arial', color:'#fff', stroke:'#000', strokeThickness:3}).setOrigin(0.5);
+      const box = this.add.rectangle(x, y + 15, 130, 175).setStrokeStyle(4, 0xffffff, 0);
+      img.setInteractive(); img.on('pointerdown', () => { this.index = i; this.choose(); });
+      this.cards.push({img, name, status, box, skin: s});
+    });
+
+    this.msg = this.add.text(W/2, 400, '', {font:'bold 22px Arial', color:'#ffde00', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+    this.add.text(W/2, 470, '← →  to pick     SPACE to buy / wear', {font:'20px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+    this.add.text(W/2, 505, 'Press B to go back', {font:'20px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+
+    this.input.keyboard.on('keydown-LEFT',  () => { this.index = (this.index + SKINS.length - 1) % SKINS.length; this.refresh(); });
+    this.input.keyboard.on('keydown-RIGHT', () => { this.index = (this.index + 1) % SKINS.length; this.refresh(); });
+    this.input.keyboard.on('keydown-SPACE', () => this.choose());
+    this.input.keyboard.on('keydown-B', () => this.scene.start('TitleScene'));
+
+    this.refresh();
+  }
+
+  choose() {
+    const s = SKINS[this.index];
+    const owned = getOwned();
+    if (owned.includes(s.key)) {
+      setSelected(s.key);
+      this.msg.setText('Now wearing ' + s.name + '!');
+    } else if (getCoins() >= s.price) {
+      setCoins(getCoins() - s.price);
+      owned.push(s.key); setOwned(owned);
+      setSelected(s.key);
+      this.msg.setText('Bought ' + s.name + '! 🎉');
+    } else {
+      this.msg.setText('Not enough coins for ' + s.name + '!');
+    }
+    this.coinText.setText('💰 ' + getCoins() + ' coins');
+    this.refresh();
+  }
+
+  refresh() {
+    const owned = getOwned();
+    const selected = getSelected();
+    this.cards.forEach((c, i) => {
+      const s = c.skin;
+      if (selected === s.key) { c.status.setText('WEARING'); c.status.setColor('#7CFC00'); }
+      else if (owned.includes(s.key)) { c.status.setText('Owned'); c.status.setColor('#9fd8ff'); }
+      else { c.status.setText('💰 ' + s.price); c.status.setColor('#ffde00'); }
+      c.box.setStrokeStyle(4, 0xffde00, i === this.index ? 1 : 0);
+      c.img.setScale(i === this.index ? 2.3 : 1.9);
+    });
+  }
+}
+
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+  create() {
+    drawField(this);
+    ensureTextures(this);
+
+    const sel = skinByKey(getSelected());
+    this.player = this.physics.add.image(W/2, H/2, sel.key);
+    this.player.setCollideWorldBounds(true);
+    this.playerLabel = this.add.text(0, 0, sel.name.toUpperCase(), {font:'bold 13px Arial', color:'#eaffff', stroke:'#000', strokeThickness:3}).setOrigin(0.5);
+
+    this.bots = this.physics.add.group();
+
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+
+    this.startTime = this.time.now;
+    this.botSpeed = 140;
+    this.alive = true;
+
+    this.scoreText = this.add.text(14, 12, 'Time: 0.0s', {font:'bold 24px Arial', color:'#fff', stroke:'#000', strokeThickness:5});
+    this.chaserText = this.add.text(14, 44, 'Ronaldos: 0', {font:'bold 20px Arial', color:'#ffde00', stroke:'#000', strokeThickness:4});
+
+    this.spawnBot(); this.spawnBot();
+    this.time.addEvent({delay: 6000, loop: true, callback: () => { if (this.alive) this.spawnBot(); }});
+
+    this.physics.add.overlap(this.player, this.bots, () => this.gameOver(), null, this);
+  }
+
+  spawnBot() {
+    const edge = Phaser.Math.Between(0, 3);
+    let x, y;
+    if (edge === 0) { x = 0; y = Phaser.Math.Between(0, H); }
+    else if (edge === 1) { x = W; y = Phaser.Math.Between(0, H); }
+    else if (edge === 2) { x = Phaser.Math.Between(0, W); y = 0; }
+    else { x = Phaser.Math.Between(0, W); y = H; }
+    const bot = this.bots.create(x, y, 'ronaldo');
+    bot.setCollideWorldBounds(true);
+    bot.label = this.add.text(0, 0, 'CR7', {font:'bold 12px Arial', color:'#ffd6d6', stroke:'#000', strokeThickness:3}).setOrigin(0.5);
+  }
+
+  update(time) {
+    if (!this.alive) return;
+    const speed = 250;
+    let vx = 0, vy = 0;
+    if (this.cursors.left.isDown || this.wasd.A.isDown) vx = -speed;
+    else if (this.cursors.right.isDown || this.wasd.D.isDown) vx = speed;
+    if (this.cursors.up.isDown || this.wasd.W.isDown) vy = -speed;
+    else if (this.cursors.down.isDown || this.wasd.S.isDown) vy = speed;
+    this.player.setVelocity(vx, vy);
+    this.playerLabel.setPosition(this.player.x, this.player.y - 32);
+
+    const secs = (time - this.startTime) / 1000;
+    this.botSpeed = 140 + secs * 6;
+
+    this.bots.getChildren().forEach(bot => {
+      this.physics.moveToObject(bot, this.player, this.botSpeed);
+      bot.label.setPosition(bot.x, bot.y - 32);
+      bot.setFlipX(this.player.x < bot.x);
+    });
+
+    this.scoreText.setText('Time: ' + secs.toFixed(1) + 's');
+    this.chaserText.setText('Ronaldos: ' + this.bots.getChildren().length);
+  }
+
+  gameOver() {
+    this.alive = false;
+    this.physics.pause();
+    const secs = (this.time.now - this.startTime) / 1000;
+    const earned = Math.floor(secs);
+    setCoins(getCoins() + earned);
+    this.registry.set('score', secs.toFixed(1));
+    this.registry.set('earned', earned);
+    this.scene.start('GameOverScene');
+  }
+}
+
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  create() {
+    drawField(this);
+    const score = this.registry.get('score') || '0.0';
+    const earned = this.registry.get('earned') || 0;
+    this.add.text(W/2, 140, 'TAGGED!', {font:'bold 64px Arial', color:'#d80027', stroke:'#000', strokeThickness:8}).setOrigin(0.5);
+    this.add.text(W/2, 240, 'You survived ' + score + ' seconds', {font:'bold 32px Arial', color:'#fff', stroke:'#000', strokeThickness:5}).setOrigin(0.5);
+    this.add.text(W/2, 295, '💰 +' + earned + ' coins   (total: ' + getCoins() + ')', {font:'bold 26px Arial', color:'#ffde00', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+    const again = this.add.text(W/2, 400, 'Press SPACE to Play Again', {font:'bold 30px Arial', color:'#fff', stroke:'#000', strokeThickness:5}).setOrigin(0.5);
+    this.tweens.add({targets: again, alpha: 0.2, duration: 600, yoyo: true, repeat: -1});
+    this.add.text(W/2, 460, 'Press S for the Skin Shop 🛒', {font:'bold 24px Arial', color:'#ffde00', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+    this.input.keyboard.once('keydown-S', () => this.scene.start('ShopScene'));
+  }
+}
+
+function drawField(scene) {
+  const g = scene.add.graphics();
+  g.fillStyle(0x2e8b3d, 1); g.fillRect(0, 0, W, H);
+  g.fillStyle(0x35a047, 1);
+  for (let i = 0; i < W; i += 100) g.fillRect(i, 0, 50, H);
+  g.lineStyle(4, 0xffffff, 0.9);
+  g.strokeRect(20, 20, W - 40, H - 40);
+  g.beginPath(); g.moveTo(W/2, 20); g.lineTo(W/2, H - 20); g.strokePath();
+  g.strokeCircle(W/2, H/2, 70);
+  g.fillStyle(0xffe14d, 0.9); g.fillCircle(W - 60, 60, 34);
+  g.fillStyle(0xfff3a0, 0.4); g.fillCircle(W - 60, 60, 50);
+}
+
+const config = {
+  type: Phaser.AUTO,
+  width: W,
+  height: H,
+  physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+  scene: [TitleScene, GameScene, ShopScene, GameOverScene]
+};
+
+const game = new Phaser.Game(config);
+</script>
+</body>
+</html>
