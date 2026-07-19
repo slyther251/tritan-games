@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Football Blitz</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+
+// ── TITLE ──────────────────────────────────────────────────────────────────
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+  create() {
+    const W = 800, H = 600;
+    this.add.rectangle(W/2, H/2, W, H, 0x2E7D32);
+    for (let x = 80; x < W; x += 80) this.add.rectangle(x, H/2, 3, H, 0xFFFFFF, 0.2);
+    this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.35);
+
+    this.add.text(W/2, 150, '🏈  FOOTBALL BLITZ', {
+      fontSize: '54px', fontFamily: 'Arial Black',
+      color: '#FFD700', stroke: '#000', strokeThickness: 7
+    }).setOrigin(0.5);
+
+    this.add.rectangle(W/2, 320, 520, 150, 0x000000, 0.65);
+    this.add.text(W/2, 268, 'MOUSE  Aim your throw', { fontSize: '22px', color: '#ffffff' }).setOrigin(0.5);
+    this.add.text(W/2, 305, 'CLICK  Throw the ball', { fontSize: '22px', color: '#FFD700' }).setOrigin(0.5);
+    this.add.text(W/2, 340, 'Hit green receivers → Touchdown!', { fontSize: '18px', color: '#aaffaa' }).setOrigin(0.5);
+    this.add.text(W/2, 375, 'Every 3 TDs → Field Goal kick!', { fontSize: '18px', color: '#ffddaa' }).setOrigin(0.5);
+
+    const st = this.add.text(W/2, 470, 'Click to Start!', {
+      fontSize: '36px', fontFamily: 'Arial Black',
+      color: '#ffffff', stroke: '#000', strokeThickness: 5
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: st, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
+
+    this.input.once('pointerdown', () => this.scene.start('GameScene'));
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+  }
+}
+
+// ── GAME ───────────────────────────────────────────────────────────────────
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+
+  create() {
+    const W = 800, H = 600;
+    this.W = W; this.H = H;
+
+    // ── FIELD ──
+    this.add.rectangle(W/2, H/2, W, H, 0x388E3C);
+    for (let x = 80; x < 670; x += 80) this.add.rectangle(x, H/2, 3, H, 0xFFFFFF, 0.2);
+    // Hash marks
+    for (let x = 80; x < 670; x += 80) {
+      this.add.rectangle(x, H/3, 3, 20, 0xFFFFFF, 0.5);
+      this.add.rectangle(x, 2*H/3, 3, 20, 0xFFFFFF, 0.5);
+    }
+    // End zone
+    this.add.rectangle(735, H/2, 130, H, 0x1B5E20);
+    this.add.text(735, H/2 - 18, 'END', { fontSize: '22px', fontFamily: 'Arial Black', color: '#ffffff' }).setOrigin(0.5);
+    this.add.text(735, H/2 + 18, 'ZONE', { fontSize: '22px', fontFamily: 'Arial Black', color: '#ffffff' }).setOrigin(0.5);
+    // QB zone tint
+    this.add.rectangle(50, H/2, 100, H, 0x1565C0, 0.12);
+    // Goalposts (top right)
+    this.add.rectangle(788, 155, 8, 110, 0xFFD700);  // stem
+    this.add.rectangle(788, 100, 110, 8, 0xFFD700);  // crossbar
+    this.add.rectangle(743, 72, 8, 62, 0xFFD700);    // left upright
+    this.add.rectangle(833, 72, 8, 62, 0xFFD700);    // right upright
+    // Crowd strip at top
+    this.add.rectangle(W/2, 18, W, 36, 0x4A148C, 0.55);
+    for (let i = 0; i < 32; i++) {
+      const c = [0xFF4444,0x44DDFF,0xFFFF44,0xFF44FF,0x44FF88][i%5];
+      this.add.circle(i*26+8, 18, 9, c);
+    }
+
+    // ── QB (drawn with graphics) ──
+    const qg = this.add.graphics().setDepth(3);
+    qg.fillStyle(0xFFCBA4); qg.fillCircle(80, 300, 13);         // head
+    qg.fillStyle(0x1565C0); qg.fillRect(67, 310, 26, 30);       // body
+    qg.fillStyle(0x0D47A1); qg.fillRect(68, 288, 24, 16);       // helmet
+    qg.fillStyle(0xFFFFFF); qg.fillRect(72, 295, 16, 5);        // visor
+    qg.fillStyle(0x1565C0); qg.fillRect(57, 311, 12, 22);       // left arm
+    qg.fillRect(93, 311, 12, 22);                                // right arm
+    qg.fillStyle(0xFFFFFF); qg.fillRect(68, 338, 10, 18);       // left leg
+    qg.fillRect(80, 338, 10, 18);                                // right leg
+    this.add.text(80, 368, 'QB', {
+      fontSize: '13px', fontFamily: 'Arial Black',
+      color: '#FFD700', stroke: '#000', strokeThickness: 2
+    }).setOrigin(0.5).setDepth(4);
+    this.qbX = 80; this.qbY = 300;
+
+    // ── RECEIVERS ──
+    this.receivers = [
+      { x: 150, y: 160, speed: 135, color: 0x00C853 },
+      { x: 150, y: 300, speed:  95, color: 0x00C853 },
+      { x: 150, y: 440, speed: 118, color: 0x00C853 },
+    ];
+    this.receivers.forEach(r => {
+      r.sprite = this.add.circle(r.x, r.y, 18, r.color).setDepth(4);
+      r.label  = this.add.text(r.x, r.y, 'WR', {
+        fontSize: '11px', fontFamily: 'Arial Black', color: '#fff'
+      }).setOrigin(0.5).setDepth(5);
+      r.active = true;
+    });
+
+    // ── DEFENDERS ──
+    this.defenders = [
+      { x: 310, y: 210, vx: 75, vy: 50 },
+      { x: 470, y: 400, vx: -60, vy: 70 },
+    ];
+    this.defenders.forEach(d => {
+      d.sprite = this.add.circle(d.x, d.y, 18, 0xD32F2F).setDepth(4);
+      d.label  = this.add.text(d.x, d.y, 'CB', {
+        fontSize: '11px', fontFamily: 'Arial Black', color: '#fff'
+      }).setOrigin(0.5).setDepth(5);
+    });
+
+    // ── BALL ──
+    this.ballG = this.add.graphics().setDepth(6);
+    this.ball = { active: false };
+
+    // ── AIM LINE ──
+    this.aimG = this.add.graphics().setDepth(2);
+
+    // ── FIELD GOAL METER ──
+    this.fgBG    = this.add.rectangle(W/2, H-70, 320, 28, 0x222222).setDepth(15).setVisible(false);
+    this.fgGreen = this.add.rectangle(W/2, H-70, 100, 24, 0x00CC44, 0.65).setDepth(16).setVisible(false);
+    this.fgBar   = this.add.rectangle(W/2-150, H-70, 18, 24, 0xFF4400).setDepth(17).setVisible(false);
+    this.fgHint  = this.add.text(W/2, H-110, '', {
+      fontSize: '20px', fontFamily: 'Arial Black',
+      color: '#FFD700', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5).setDepth(17).setVisible(false);
+    // Meter labels
+    this.fgPowerLabel = this.add.text(W/2-165, H-70, 'WEAK', {
+      fontSize: '12px', color: '#FF8888'
+    }).setOrigin(0.5).setDepth(17).setVisible(false);
+    this.fgPowerLabel2 = this.add.text(W/2+165, H-70, 'WEAK', {
+      fontSize: '12px', color: '#FF8888'
+    }).setOrigin(0.5).setDepth(17).setVisible(false);
+    this.fgCenter = this.add.text(W/2, H-70, '💪', {
+      fontSize: '14px'
+    }).setOrigin(0.5).setDepth(17).setVisible(false);
+
+    // ── STATUS TEXT ──
+    this.statusTxt = this.add.text(W/2, H/2, '', {
+      fontSize: '58px', fontFamily: 'Arial Black',
+      color: '#FFD700', stroke: '#000', strokeThickness: 8
+    }).setOrigin(0.5).setDepth(20);
+
+    // ── GAME STATE ──
+    this.score = 0;
+    this.tds   = 0;
+    this.timeLeft = 75;
+    this.state = 'ready';
+    this.fgMeterPos = -1;
+    this.fgMeterDir = 1;
+    this.fgPower = 0;
+
+    // ── UI BAR ──
+    this.add.rectangle(W/2, 14, W, 28, 0x000000, 0.75).setDepth(10);
+    this.scoreTxt = this.add.text(10, 3, 'Score: 0', {
+      fontSize: '20px', color: '#FFD700', stroke: '#000', strokeThickness: 3
+    }).setDepth(11);
+    this.timerTxt = this.add.text(W/2, 3, '75s', {
+      fontSize: '20px', color: '#ffffff', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5, 0).setDepth(11);
+    this.tdTxt = this.add.text(W-10, 3, 'TDs: 0', {
+      fontSize: '20px', color: '#aaffaa', stroke: '#000', strokeThickness: 3
+    }).setOrigin(1, 0).setDepth(11);
+
+    // ── TIMER ──
+    this.time.addEvent({
+      delay: 1000, repeat: 74,
+      callback: () => {
+        if (this.state === 'game_over') return;
+        this.timeLeft--;
+        this.timerTxt.setText(this.timeLeft + 's');
+        if (this.timeLeft <= 10) this.timerTxt.setColor('#FF4444');
+        if (this.timeLeft <= 0)  this.endGame();
+      }
+    });
+
+    // ── INPUT ──
+    this.input.on('pointermove', p => {
+      if (this.state === 'ready') this.drawAim(p.x, p.y);
+    });
+    this.input.on('pointerdown', p => this.handleClick(p.x, p.y));
+  }
+
+  drawAim(tx, ty) {
+    this.aimG.clear();
+    if (tx < this.qbX + 20) return;
+    const dx = tx - this.qbX, dy = ty - this.qbY;
+    const steps = 12;
+    this.aimG.lineStyle(2, 0xFFFFFF, 0.45);
+    for (let i = 0; i < steps; i += 2) {
+      const t0 = i/steps, t1 = (i+1)/steps;
+      const x0 = this.qbX + dx*t0, y0 = this.qbY + dy*t0 - 70*Math.sin(Math.PI*t0);
+      const x1 = this.qbX + dx*t1, y1 = this.qbY + dy*t1 - 70*Math.sin(Math.PI*t1);
+      this.aimG.beginPath();
+      this.aimG.moveTo(x0, y0); this.aimG.lineTo(x1, y1);
+      this.aimG.strokePath();
+    }
+  }
+
+  handleClick(x, y) {
+    if (this.state === 'ready') {
+      if (x < this.qbX + 30) return;
+      this.throwBall(x, y);
+    } else if (this.state === 'fg_power') {
+      this.fgPower = this.fgMeterPos; // save position (-1 to 1)
+      this.fgMeterPos = -1;
+      this.fgMeterDir = 1;
+      this.state = 'fg_aim';
+      this.fgHint.setText('Now click to AIM!');
+    } else if (this.state === 'fg_aim') {
+      this.resolveFieldGoal(this.fgMeterPos);
+    }
+  }
+
+  throwBall(tx, ty) {
+    this.aimG.clear();
+    this.state = 'thrown';
+    this.ball = { active: true, sx: this.qbX, sy: this.qbY, tx, ty, t: 0, dur: 0.52 };
+    this.playThrowSound();
+  }
+
+  playThrowSound() {
+    try {
+      const ac = new (window.AudioContext||window.webkitAudioContext)();
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.connect(g); g.connect(ac.destination);
+      o.frequency.setValueAtTime(400, ac.currentTime);
+      o.frequency.exponentialRampToValueAtTime(200, ac.currentTime+0.15);
+      g.gain.setValueAtTime(0.2, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+0.15);
+      o.start(); o.stop(ac.currentTime+0.15);
+    } catch(e) {}
+  }
+
+  updateBall(delta) {
+    this.ball.t += delta / 1000;
+    const p = Math.min(this.ball.t / this.ball.dur, 1);
+    const bx = this.ball.sx + (this.ball.tx - this.ball.sx) * p;
+    const by = this.ball.sy + (this.ball.ty - this.ball.sy) * p - 90*Math.sin(Math.PI*p);
+    this.ballG.clear();
+    this.ballG.fillStyle(0x8B4513);
+    this.ballG.fillEllipse(bx, by, 22, 14);
+    this.ballG.lineStyle(1.5, 0xFFFFFF, 0.9);
+    this.ballG.beginPath();
+    this.ballG.moveTo(bx-5, by); this.ballG.lineTo(bx+5, by);
+    this.ballG.strokePath();
+    if (p >= 1) {
+      this.ball.active = false;
+      this.ballG.clear();
+      this.checkCatch(this.ball.tx, this.ball.ty);
+    }
+  }
+
+  checkCatch(tx, ty) {
+    // Interception?
+    for (const d of this.defenders) {
+      if (Math.hypot(d.x-tx, d.y-ty) < 50) {
+        this.showStatus('INTERCEPTED! ❌', '#FF4444');
+        this.time.delayedCall(900, () => { this.statusTxt.setText(''); this.state = 'ready'; });
+        return;
+      }
+    }
+    // Receiver catch?
+    for (const r of this.receivers) {
+      if (!r.active) continue;
+      if (Math.hypot(r.x-tx, r.y-ty) < 62) {
+        this.onTouchdown(r); return;
+      }
+    }
+    // Incomplete
+    this.showStatus('Incomplete!', '#ffffff');
+    this.time.delayedCall(700, () => { this.statusTxt.setText(''); this.state = 'ready'; });
+  }
+
+  onTouchdown(r) {
+    this.score += 6;
+    this.tds++;
+    this.scoreTxt.setText('Score: ' + this.score);
+    this.tdTxt.setText('TDs: ' + this.tds);
+    this.showStatus('TOUCHDOWN! 🏈', '#FFD700');
+    r.active = false;
+    r.sprite.setAlpha(0.2); r.label.setAlpha(0.2);
+    this.cameras.main.shake(200, 0.008);
+
+    this.time.delayedCall(1300, () => {
+      this.statusTxt.setText('');
+      this.receivers.forEach(recv => {
+        recv.active = true; recv.sprite.setAlpha(1); recv.label.setAlpha(1);
+        recv.x = 150; recv.sprite.setPosition(recv.x, recv.y); recv.label.setPosition(recv.x, recv.y);
+      });
+      if (this.tds % 3 === 0) this.startFieldGoal();
+      else this.state = 'ready';
+    });
+  }
+
+  startFieldGoal() {
+    this.showStatus('FIELD GOAL! ⭐', '#FFD700');
+    this.time.delayedCall(1100, () => {
+      this.statusTxt.setText('');
+      this.state = 'fg_power';
+      this.fgMeterPos = -1; this.fgMeterDir = 1;
+      [this.fgBG, this.fgGreen, this.fgBar, this.fgHint,
+       this.fgPowerLabel, this.fgPowerLabel2, this.fgCenter].forEach(o => o.setVisible(true));
+      this.fgHint.setText('Click to set POWER!');
+    });
+  }
+
+  resolveFieldGoal(aimPos) {
+    [this.fgBG, this.fgGreen, this.fgBar, this.fgHint,
+     this.fgPowerLabel, this.fgPowerLabel2, this.fgCenter].forEach(o => o.setVisible(false));
+
+    // Good if both power and aim were near center (< 0.35 away from 0)
+    const goodPower = Math.abs(this.fgPower) < 0.38;
+    const goodAim   = Math.abs(aimPos) < 0.38;
+
+    if (goodPower && goodAim) {
+      this.score += 3;
+      this.scoreTxt.setText('Score: ' + this.score);
+      this.showStatus('IT\'S GOOD! +3 ✅', '#FFD700');
+    } else {
+      this.showStatus('No good! ❌', '#FF4444');
+    }
+    this.cameras.main.shake(120, 0.006);
+    this.time.delayedCall(1200, () => { this.statusTxt.setText(''); this.state = 'ready'; });
+  }
+
+  showStatus(msg, color) {
+    this.statusTxt.setText(msg).setColor(color);
+  }
+
+  endGame() {
+    this.state = 'game_over';
+    this.scene.start('GameOverScene', { score: this.score, tds: this.tds });
+  }
+
+  update(time, delta) {
+    if (this.state === 'game_over') return;
+
+    // Move receivers
+    this.receivers.forEach(r => {
+      if (!r.active) return;
+      r.x += r.speed * delta / 1000;
+      if (r.x > 800) r.x = 150;
+      r.sprite.setPosition(r.x, r.y);
+      r.label.setPosition(r.x, r.y);
+    });
+
+    // Move defenders
+    this.defenders.forEach(d => {
+      d.x += d.vx * delta / 1000;
+      d.y += d.vy * delta / 1000;
+      if (d.x < 130 || d.x > 650) d.vx *= -1;
+      if (d.y < 80 || d.y > 520) d.vy *= -1;
+      d.sprite.setPosition(d.x, d.y);
+      d.label.setPosition(d.x, d.y);
+    });
+
+    // Ball flight
+    if (this.state === 'thrown' && this.ball.active) this.updateBall(delta);
+
+    // Field goal meter
+    if (this.state === 'fg_power' || this.state === 'fg_aim') {
+      this.fgMeterPos += this.fgMeterDir * 2.0 * delta / 1000;
+      if (this.fgMeterPos >=  1) { this.fgMeterPos =  1; this.fgMeterDir = -1; }
+      if (this.fgMeterPos <= -1) { this.fgMeterPos = -1; this.fgMeterDir =  1; }
+      this.fgBar.setPosition(this.W/2 + this.fgMeterPos * 150, this.H - 70);
+      // Color the bar: green when near center
+      const nearCenter = Math.abs(this.fgMeterPos) < 0.38;
+      this.fgBar.setFillStyle(nearCenter ? 0x00FF44 : 0xFF4400);
+    }
+  }
+}
+
+// ── GAME OVER ──────────────────────────────────────────────────────────────
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  create() {
+    const W = 800, H = 600;
+    this.add.rectangle(W/2, H/2, W, H, 0x1B5E20);
+    for (let x = 80; x < W; x += 80) this.add.rectangle(x, H/2, 3, H, 0xFFFFFF, 0.18);
+    this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.52);
+
+    const { score = 0, tds = 0 } = this.scene.settings.data || {};
+
+    this.add.text(W/2, 150, '🏈  GAME OVER', {
+      fontSize: '58px', fontFamily: 'Arial Black',
+      color: '#FFD700', stroke: '#000', strokeThickness: 8
+    }).setOrigin(0.5);
+
+    this.add.text(W/2, 275, 'Score: ' + score, {
+      fontSize: '46px', fontFamily: 'Arial Black',
+      color: '#ffffff', stroke: '#000', strokeThickness: 6
+    }).setOrigin(0.5);
+
+    this.add.text(W/2, 345, 'Touchdowns: ' + tds, {
+      fontSize: '28px', color: '#aaffaa', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5);
+
+    // Rating
+    const rating = score >= 42 ? '🏆 MVP!' : score >= 24 ? '⭐ All-Star!' : score >= 12 ? '👍 Good game!' : '💪 Keep practicing!';
+    this.add.text(W/2, 405, rating, {
+      fontSize: '30px', fontFamily: 'Arial Black',
+      color: '#FFD700', stroke: '#000', strokeThickness: 4
+    }).setOrigin(0.5);
+
+    const rt = this.add.text(W/2, 490, 'Click to Play Again!', {
+      fontSize: '32px', fontFamily: 'Arial Black',
+      color: '#ffffff', stroke: '#000', strokeThickness: 4
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: rt, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
+
+    this.input.once('pointerdown', () => this.scene.start('GameScene'));
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+  }
+}
+
+// ── CONFIG ─────────────────────────────────────────────────────────────────
+const config = {
+  type: Phaser.AUTO,
+  width: 800, height: 600,
+  physics: { default: 'arcade', arcade: { debug: false } },
+  scene: [TitleScene, GameScene, GameOverScene]
+};
+new Phaser.Game(config);
+</script>
+</body>
+</html>

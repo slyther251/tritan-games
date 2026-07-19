@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Blaster Arena</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; cursor: crosshair; }
+  </style>
+</head>
+<body>
+<script>
+const W = 800, H = 600;
+
+// Draw a grassy Fortnite-style arena
+function drawArena(scene) {
+  for (let i = 0; i < 15; i++) {
+    const c = (i % 2 === 0) ? 0x4caf50 : 0x43a047;
+    scene.add.rectangle(W/2, i * 40 + 20, W, 40, c);
+  }
+  // bushes in the corners
+  [[60,60],[W-60,60],[60,H-60],[W-60,H-60]].forEach(([x,y]) => {
+    scene.add.circle(x, y, 26, 0x2e7d32);
+    scene.add.circle(x-12, y+6, 18, 0x388e3c);
+    scene.add.circle(x+14, y+4, 16, 0x388e3c);
+  });
+  // a couple of loot chests for flavor
+  [[W/2, 110], [W/2, H-110]].forEach(([x,y]) => {
+    scene.add.rectangle(x, y, 34, 24, 0x8d6e63).setStrokeStyle(2, 0x5d4037);
+    scene.add.rectangle(x, y-6, 34, 8, 0xffca28);
+  });
+}
+
+// Build the player blaster-trooper as a container facing a direction
+function makePlayer(scene, x, y) {
+  const c = scene.add.container(x, y);
+  c.add(scene.add.ellipse(0, 14, 30, 8, 0x000000, 0.25)); // shadow
+  c.add(scene.add.circle(0, 0, 16, 0x1e88e5).setStrokeStyle(2, 0x0d47a1)); // body
+  c.add(scene.add.circle(0, -4, 9, 0xffe0b2)); // head
+  c.add(scene.add.circle(0, -4, 9, 0x000000, 0).setStrokeStyle(2, 0x0d47a1));
+  // blaster (a chunky foam gun) sticking out to the right by default
+  const gun = scene.add.rectangle(16, 0, 22, 8, 0xff7043).setStrokeStyle(2, 0xbf360c);
+  gun.setOrigin(0, 0.5);
+  c.gun = gun;
+  c.add(gun);
+  return c;
+}
+
+// Build a goofy robot bot
+function makeBot(scene, x, y) {
+  const c = scene.add.container(x, y);
+  c.add(scene.add.ellipse(0, 14, 28, 8, 0x000000, 0.25));
+  c.add(scene.add.rectangle(0, 0, 26, 26, 0x9c27b0).setStrokeStyle(2, 0x4a148c)); // body
+  c.add(scene.add.circle(-6, -2, 4, 0xffeb3b)); // eye
+  c.add(scene.add.circle(6, -2, 4, 0xffeb3b));  // eye
+  c.add(scene.add.circle(-6, -2, 2, 0x000000));
+  c.add(scene.add.circle(6, -2, 2, 0x000000));
+  c.add(scene.add.rectangle(0, -17, 3, 8, 0x4a148c)); // antenna
+  c.add(scene.add.circle(0, -22, 3, 0xff5252));
+  return c;
+}
+
+// ---------- Title Scene ----------
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+  create() {
+    drawArena(this);
+    this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.4);
+
+    this.add.text(W/2, 120, 'BLASTER ARENA', {
+      fontFamily: 'Arial Black, Arial', fontSize: '58px', color: '#ffffff',
+      stroke: '#1b1b1b', strokeThickness: 8
+    }).setOrigin(0.5);
+
+    this.add.text(W/2, 185, '🔫 Tag the goofy bots before they get you!', {
+      fontFamily: 'Arial', fontSize: '24px', color: '#ffd43b'
+    }).setOrigin(0.5);
+
+    const lines = [
+      'WASD or Arrow Keys  →  Move',
+      'Mouse  →  Aim your blaster',
+      'Click (or hold)  →  Fire foam darts',
+      'Pop bots for points — don\'t let them touch you!',
+      'You have 3 lives. Survive as long as you can!'
+    ];
+    lines.forEach((t, i) => {
+      this.add.text(W/2, 270 + i*40, t, {
+        fontFamily: 'Arial', fontSize: '21px', color: '#ffffff'
+      }).setOrigin(0.5);
+    });
+
+    const prompt = this.add.text(W/2, 520, 'Press SPACE to Start', {
+      fontFamily: 'Arial Black, Arial', fontSize: '32px', color: '#ffffff',
+      backgroundColor: '#c0392b', padding: { x: 20, y: 10 }
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: prompt, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
+
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+  }
+}
+
+// ---------- Game Scene ----------
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+
+  create() {
+    this.score = 0;
+    this.lives = 3;
+    this.speed = 240;
+    this.shootCooldown = 0;
+    this.invuln = 0;
+    this.elapsed = 0;
+    this.over = false;
+
+    drawArena(this);
+
+    // Player
+    this.player = makePlayer(this, W/2, H/2);
+    this.physics.add.existing(this.player);
+    this.player.body.setCircle(16, -16, -16);
+    this.player.body.setCollideWorldBounds(true);
+
+    // Groups
+    this.darts = this.physics.add.group();
+    this.bots = this.physics.add.group();
+
+    this.physics.add.overlap(this.darts, this.bots, this.hitBot, null, this);
+    this.physics.add.overlap(this.player, this.bots, this.hitPlayer, null, this);
+
+    // Spawn bots, faster over time
+    this.spawnTimer = this.time.addEvent({ delay: 1300, loop: true, callback: () => this.spawnBot() });
+    for (let i = 0; i < 3; i++) this.spawnBot();
+
+    // every 10s, ramp difficulty
+    this.time.addEvent({ delay: 10000, loop: true, callback: () => {
+      if (this.spawnTimer.delay > 450) this.spawnTimer.delay -= 150;
+    }});
+
+    // survival clock
+    this.time.addEvent({ delay: 1000, loop: true, callback: () => {
+      if (!this.over) { this.elapsed++; this.timeText.setText('TIME  ' + this.elapsed + 's'); }
+    }});
+
+    // HUD
+    this.add.rectangle(W/2, 0, W, 32, 0x000000, 0.55).setOrigin(0.5, 0);
+    this.scoreText = this.add.text(14, 5, 'SCORE  0', {
+      fontFamily: 'Arial Black, Arial', fontSize: '20px', color: '#ffd43b'
+    });
+    this.timeText = this.add.text(W/2, 5, 'TIME  0s', {
+      fontFamily: 'Arial Black, Arial', fontSize: '20px', color: '#ffffff'
+    }).setOrigin(0.5, 0);
+    this.livesText = this.add.text(W - 14, 5, '❤❤❤', {
+      fontFamily: 'Arial', fontSize: '22px', color: '#ff5252'
+    }).setOrigin(1, 0);
+
+    // Input
+    this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT');
+  }
+
+  spawnBot() {
+    if (this.over || this.bots.getLength() >= 16) return;
+    // pick a random edge
+    let x, y;
+    const side = Phaser.Math.Between(0, 3);
+    if (side === 0) { x = Phaser.Math.Between(0, W); y = -20; }
+    else if (side === 1) { x = Phaser.Math.Between(0, W); y = H + 20; }
+    else if (side === 2) { x = -20; y = Phaser.Math.Between(0, H); }
+    else { x = W + 20; y = Phaser.Math.Between(0, H); }
+
+    const bot = makeBot(this, x, y);
+    this.physics.add.existing(bot);
+    bot.body.setCircle(14, -14, -14);
+    bot.botSpeed = Phaser.Math.Between(70, 90) + this.elapsed;
+    this.bots.add(bot);
+    // wobble for goofiness
+    this.tweens.add({ targets: bot, angle: 8, duration: 250, yoyo: true, repeat: -1 });
+  }
+
+  shoot() {
+    const p = this.input.activePointer;
+    const ang = Phaser.Math.Angle.Between(this.player.x, this.player.y, p.worldX, p.worldY);
+    const dart = this.add.container(this.player.x, this.player.y);
+    dart.add(this.add.ellipse(0, 0, 14, 6, 0xffeb3b).setStrokeStyle(2, 0xf57f17));
+    dart.setRotation(ang);
+    this.physics.add.existing(dart);
+    dart.body.setCircle(6, -6, -6);
+    this.physics.velocityFromRotation(ang, 560, dart.body.velocity);
+    this.darts.add(dart);
+    this.shootCooldown = 14; // frames between shots
+    // recoil pop sound
+    this.blip(700, 0.05);
+  }
+
+  hitBot(dart, bot) {
+    dart.destroy();
+    this.confetti(bot.x, bot.y);
+    bot.destroy();
+    this.score += 10;
+    this.scoreText.setText('SCORE  ' + this.score);
+    this.blip(420, 0.08);
+  }
+
+  hitPlayer(player, bot) {
+    if (this.invuln > 0) return;
+    this.confetti(bot.x, bot.y);
+    bot.destroy();
+    this.lives--;
+    this.livesText.setText('❤'.repeat(Math.max(0, this.lives)));
+    this.invuln = 90;
+    this.cameras.main.shake(200, 0.015);
+    this.blip(160, 0.12);
+    if (this.lives <= 0) this.endGame();
+  }
+
+  confetti(x, y) {
+    const colors = [0xff5252, 0xffeb3b, 0x40c4ff, 0x69f0ae, 0xff4081];
+    for (let i = 0; i < 10; i++) {
+      const p = this.add.rectangle(x, y, 6, 6, colors[i % colors.length]);
+      const a = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      const d = Phaser.Math.Between(20, 50);
+      this.tweens.add({
+        targets: p, x: x + Math.cos(a)*d, y: y + Math.sin(a)*d, alpha: 0, scale: 0,
+        duration: 450, onComplete: () => p.destroy()
+      });
+    }
+  }
+
+  blip(freq, dur) {
+    try {
+      const ac = this.sound && this.sound.context;
+      const ctx = ac || new (window.AudioContext || window.webkitAudioContext)();
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.08, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+      o.start(); o.stop(ctx.currentTime + dur);
+    } catch (e) {}
+  }
+
+  update() {
+    if (this.over) return;
+    const b = this.player.body;
+    b.setVelocity(0);
+    const k = this.keys;
+    if (k.A.isDown || k.LEFT.isDown)  b.setVelocityX(-this.speed);
+    if (k.D.isDown || k.RIGHT.isDown) b.setVelocityX(this.speed);
+    if (k.W.isDown || k.UP.isDown)    b.setVelocityY(-this.speed);
+    if (k.S.isDown || k.DOWN.isDown)  b.setVelocityY(this.speed);
+
+    // aim the blaster toward the mouse
+    const p = this.input.activePointer;
+    const ang = Phaser.Math.Angle.Between(this.player.x, this.player.y, p.worldX, p.worldY);
+    this.player.gun.setRotation(ang);
+
+    // shooting (hold to auto-fire)
+    if (this.shootCooldown > 0) this.shootCooldown--;
+    if (p.isDown && this.shootCooldown <= 0) this.shoot();
+
+    // bots chase the player
+    this.bots.getChildren().forEach(bot => {
+      this.physics.moveToObject(bot, this.player, bot.botSpeed);
+    });
+
+    // clean up darts that fly off-screen
+    this.darts.getChildren().forEach(d => {
+      if (d.x < -30 || d.x > W + 30 || d.y < -30 || d.y > H + 30) d.destroy();
+    });
+
+    // invulnerability flicker
+    if (this.invuln > 0) {
+      this.invuln--;
+      this.player.setAlpha(Math.floor(this.time.now / 70) % 2 === 0 ? 0.3 : 1);
+    } else {
+      this.player.setAlpha(1);
+    }
+  }
+
+  endGame() {
+    this.over = true;
+    this.scene.start('GameOverScene', { score: this.score, time: this.elapsed });
+  }
+}
+
+// ---------- Game Over Scene ----------
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  init(data) { this.finalScore = data.score || 0; this.finalTime = data.time || 0; }
+  create() {
+    drawArena(this);
+    this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.6);
+
+    this.add.text(W/2, 160, 'GAME OVER', {
+      fontFamily: 'Arial Black, Arial', fontSize: '64px', color: '#ffffff',
+      stroke: '#000', strokeThickness: 8
+    }).setOrigin(0.5);
+
+    this.add.text(W/2, 270, 'Score: ' + this.finalScore, {
+      fontFamily: 'Arial Black, Arial', fontSize: '42px', color: '#ffd43b'
+    }).setOrigin(0.5);
+
+    this.add.text(W/2, 330, 'Survived: ' + this.finalTime + ' seconds', {
+      fontFamily: 'Arial', fontSize: '28px', color: '#ffffff'
+    }).setOrigin(0.5);
+
+    let msg = 'Good effort!';
+    if (this.finalScore >= 300) msg = 'LEGENDARY! You cleared the arena!';
+    else if (this.finalScore >= 150) msg = 'Amazing blasting!';
+    else if (this.finalScore >= 50) msg = 'Nice shooting!';
+    this.add.text(W/2, 390, msg, {
+      fontFamily: 'Arial', fontSize: '26px', color: '#7CFC00'
+    }).setOrigin(0.5);
+
+    const prompt = this.add.text(W/2, 490, 'Press SPACE to Play Again', {
+      fontFamily: 'Arial Black, Arial', fontSize: '30px', color: '#ffffff',
+      backgroundColor: '#c0392b', padding: { x: 20, y: 10 }
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: prompt, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
+
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+  }
+}
+
+const config = {
+  type: Phaser.AUTO,
+  width: W,
+  height: H,
+  physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+  scene: [TitleScene, GameScene, GameOverScene]
+};
+
+const game = new Phaser.Game(config);
+</script>
+</body>
+</html>

@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Baseball Brawl</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+
+// ── MAP DATA & BACKGROUNDS ─────────────────────────────────────────────────
+const MAPS = [
+  {
+    name: 'Stadium', desc: 'Home turf!', bgColor: 0x87CEEB,
+    platColor: 0x5C3317, trimColor: 0x3AAA3A,
+    platforms: [[400,452,620,22],[160,345,185,18],[640,345,185,18],[400,255,175,18]],
+    drawBG(s, W, H) {
+      s.add.rectangle(W/2,H/2,W,H,0x87CEEB);
+      s.add.rectangle(W/2,H-20,W,40,0x228B22);
+      s.add.rectangle(W/2,75,W,150,0xC8A06B).setAlpha(0.45);
+      for (let i=0;i<22;i++){const c=[0xFF2222,0x2266FF,0xFFDD00,0xFF69B4,0x00CED1][i%5];s.add.circle(i*37+5,68,12,c);s.add.rectangle(i*37+5,88,16,24,c);}
+    }
+  },
+  {
+    name: 'Space', desc: 'Zero gravity!', bgColor: 0x030310,
+    platColor: 0x223355, trimColor: 0x00CCFF,
+    platforms: [[400,440,500,20],[130,330,160,16],[670,330,160,16],[270,225,140,16],[530,225,140,16]],
+    drawBG(s, W, H) {
+      s.add.rectangle(W/2,H/2,W,H,0x030310);
+      // Stars
+      for(let i=0;i<120;i++) s.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,H),Phaser.Math.Between(1,2),0xFFFFFF,Phaser.Math.FloatBetween(0.2,1));
+      // Nebula glow
+      s.add.circle(160,130,90,0xFF44AA,0.06); s.add.circle(620,200,110,0x4444FF,0.07);
+      // Planet
+      s.add.circle(680,80,55,0xFF8844); s.add.circle(680,80,55,0xCC6622,0);
+      s.add.rectangle(680,65,110,12,0xCC6622,0.55); s.add.rectangle(680,88,110,9,0xAA4400,0.5);
+      s.add.circle(660,62,16,0xFFAA66,0.35);
+      // Moon
+      s.add.circle(95,85,28,0xBBBBAA); s.add.circle(86,77,11,0xAAAAAA,0.45);
+      // Ground glow
+      s.add.rectangle(W/2,H-8,W,16,0x001133);
+    }
+  },
+  {
+    name: 'Dessert', desc: 'So sweet!', bgColor: 0xFFCCE0,
+    platColor: 0x5C2C0A, trimColor: 0xFF69B4,
+    platforms: [[400,452,620,22],[160,345,185,18],[640,345,185,18],[400,255,175,18]],
+    drawBG(s, W, H) {
+      // Pastel pink sky
+      s.add.rectangle(W/2,H/2,W,H,0xFFCCE0);
+      // Pink frosting ground
+      s.add.rectangle(W/2,H-20,W,40,0xFF69B4);
+      // White frosting drip blobs along ground
+      [30,90,150,210,270,330,390,450,510,570,630,690,755].forEach(x=>s.add.circle(x,H-30,17,0xFFFFFF));
+      // Pink cotton candy cloud (left)
+      s.add.circle(118,80,38,0xFFB3D9); s.add.circle(158,64,50,0xFFB3D9); s.add.circle(200,78,36,0xFFB3D9);
+      // Blue cotton candy cloud (right)
+      s.add.circle(544,88,34,0xAAD4FF); s.add.circle(582,72,46,0xAAD4FF); s.add.circle(622,86,32,0xAAD4FF);
+      // Lollipop left
+      s.add.rectangle(55,352,6,100,0xCCCCCC);
+      s.add.circle(55,296,32,0xFF3399); s.add.circle(55,296,20,0xFFFF00); s.add.circle(55,296,8,0xFF3399);
+      // Lollipop right
+      s.add.rectangle(745,322,6,110,0xCCCCCC);
+      s.add.circle(745,260,30,0x33EEBB); s.add.circle(745,260,18,0xFF6644); s.add.circle(745,260,7,0x33EEBB);
+      // Background ice cream sundae (right side)
+      s.add.rectangle(665,420,50,70,0xE8A44A);  // cone
+      s.add.circle(658,375,36,0xFFE4B5);         // vanilla
+      s.add.circle(674,350,32,0xFFB3B3);         // strawberry
+      s.add.circle(658,328,26,0xB3E0FF);         // blueberry
+      s.add.circle(655,305,8,0xFF2200);           // cherry
+      // Sprinkles scattered around
+      [[130,210,0xFF3399,0.5],[230,190,0xFF9900,-0.8],[340,240,0x33FF99,1.2],[490,195,0x3399FF,-0.4],[590,235,0xFFFF00,0.9],[315,310,0xFF6633,-1.1],[430,275,0xCC44FF,0.7],[150,350,0xFF3399,1.5],[500,310,0x33FF33,-0.6]].forEach(([x,y,c,r])=>s.add.rectangle(x,y,12,4,c).setRotation(r));
+    }
+  },
+  {
+    name: 'Endless', desc: "Can't fall off!", bgColor: 0x0A0A1A, endless: true,
+    platColor: 0x221144, trimColor: 0x9933FF,
+    platforms: [[-100,470,1000,24],[140,350,200,16],[660,350,200,16],[400,250,220,16]],
+    drawBG(s, W, H) {
+      s.add.rectangle(W/2,H/2,W,H,0x0A0A1A);
+      // Purple neon grid
+      for(let x=0;x<=W;x+=50) s.add.rectangle(x,H/2,1,H,0x6633FF,0.18);
+      for(let y=0;y<=H;y+=50) s.add.rectangle(W/2,y,W,1,0x6633FF,0.18);
+      // Floor glow
+      s.add.rectangle(W/2,H-10,W,20,0x440088,0.7);
+      s.add.rectangle(W/2,H-3,W,6,0x9933FF,0.9);
+      // Edge glow lines
+      s.add.rectangle(2,H/2,4,H,0x9933FF,0.6);
+      s.add.rectangle(W-2,H/2,4,H,0x9933FF,0.6);
+      // "TRAINING" watermark
+      s.add.text(W/2,H/2,'TRAINING',{fontSize:'108px',fontFamily:'Arial Black',color:'#9933FF'}).setOrigin(0.5).setAlpha(0.07);
+      // Corner brackets
+      [[10,10],[W-10,10],[10,H-10],[W-10,H-10]].forEach(([cx,cy])=>{
+        const sx=cx<W/2?1:-1, sy=cy<H/2?1:-1;
+        s.add.rectangle(cx+sx*15,cy,34,3,0x9933FF,0.7);
+        s.add.rectangle(cx,cy+sy*15,3,34,0x9933FF,0.7);
+      });
+    }
+  },
+];
+
+// ── RANK SYSTEM ────────────────────────────────────────────────────────────
+const RANKS = [
+  { name: 'Rookie',        min: 0,   color: '#AAAAAA', icon: '⚾' },
+  { name: 'Farm Hand',     min: 3,   color: '#88CC44', icon: '🌿' },
+  { name: 'Minor Leaguer', min: 8,   color: '#44BBFF', icon: '💧' },
+  { name: 'Pro',           min: 15,  color: '#AA44FF', icon: '⚡' },
+  { name: 'All-Star',      min: 25,  color: '#FFAA00', icon: '⭐' },
+  { name: 'MVP',           min: 40,  color: '#FF4400', icon: '🔥' },
+  { name: 'Legend',        min: 60,  color: '#FF44CC', icon: '💎' },
+  { name: 'Hall of Famer', min: 100, color: '#FFD700', icon: '🏆' },
+];
+function getWins()      { return parseInt(localStorage.getItem('brawlWins') || '0'); }
+function addWin()       { localStorage.setItem('brawlWins', getWins() + 1); }
+function getRank(w)     { let r=RANKS[0]; for(const x of RANKS) if(w>=x.min) r=x; return r; }
+function getNextRank(w) { return RANKS.find(r => r.min > w) || null; }
+
+// ── SKIN DATA & DRAWING ────────────────────────────────────────────────────
+const SKINS = [
+  { key: 'mario',    name: 'Mario',   desc: "It's-a me!",   draw: drawMario    },
+  { key: 'fortnite', name: 'Jonesy',  desc: 'Chapter 1 OG', draw: drawFortnite },
+  { key: 'steve',    name: 'Steve',   desc: 'Dig it!',      draw: drawSteve    },
+  { key: 'gorilla',  name: 'Gorilla', desc: 'Gorilla Tag!', draw: drawGorilla  },
+  { key: 'fox',      name: 'Fox',     desc: 'Sneaky & fast!', draw: drawFox   },
+  { key: 'wolf',     name: 'Wolf',    desc: 'Alpha striker!', draw: drawWolf  },
+  { key: 'ninja',    name: 'Ninja',   desc: 'Silent & deadly!', draw: drawNinja },
+];
+
+function genTex(scene, key, drawFn) {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const g = scene.add.graphics();
+  drawFn(g);
+  g.generateTexture(key, 52, 68);
+  g.destroy();
+}
+
+function drawMario(g) {
+  g.fillStyle(0xDD1100); g.fillRect(5,2,30,15);        // cap
+  g.fillStyle(0xBB0000); g.fillRect(13,16,24,5);       // brim
+  g.fillStyle(0xFFFFFF); g.fillCircle(19,8,6);         // M badge
+  g.fillStyle(0xDD1100); g.fillRect(15,5,3,6); g.fillRect(21,5,3,6); g.fillRect(17,7,5,3);
+  g.fillStyle(0xFFCBA4); g.fillCircle(19,20,13);       // face
+  g.fillStyle(0x222222); g.fillCircle(14,18,2); g.fillCircle(24,18,2); // eyes
+  g.fillStyle(0xFFAA88); g.fillCircle(19,22,4);        // nose
+  g.fillStyle(0x3D1A00); g.fillRect(7,25,13,6); g.fillRect(21,25,13,6); // mustache
+  g.fillStyle(0x2244BB); g.fillRect(10,31,18,17); g.fillRect(8,46,11,18); g.fillRect(21,46,11,18); // overalls
+  g.fillStyle(0xFFD700); g.fillCircle(13,34,2); g.fillCircle(25,34,2); // buttons
+  g.fillStyle(0xDD1100); g.fillRect(0,30,12,18); g.fillRect(30,30,12,18); // shirt/arms
+  g.fillStyle(0xFFFFFF); g.fillCircle(5,49,6); g.fillCircle(37,49,6);  // gloves
+  g.fillStyle(0x3D1A00); g.fillRect(4,62,17,7); g.fillRect(20,62,17,7); // shoes
+  g.fillStyle(0x7B3F0E); g.fillRect(41,7,6,14);        // bat handle
+  g.fillStyle(0xC8A060); g.fillRect(39,21,10,36);      // bat barrel
+}
+
+function drawLuigi(g) {
+  g.fillStyle(0x1A9900); g.fillRect(5,2,30,15);
+  g.fillStyle(0x117700); g.fillRect(13,16,24,5);
+  g.fillStyle(0xFFFFFF); g.fillCircle(19,8,6);
+  g.fillStyle(0x1A9900); g.fillRect(16,4,3,9); g.fillRect(16,11,7,3); // L
+  g.fillStyle(0xFFCBA4); g.fillCircle(19,20,13);
+  g.fillStyle(0x222222); g.fillCircle(14,18,2); g.fillCircle(24,18,2);
+  g.fillStyle(0xFFAA88); g.fillCircle(19,22,4);
+  g.fillStyle(0x3D1A00); g.fillRect(9,25,11,5); g.fillRect(21,25,11,5); // thinner mustache
+  g.fillStyle(0x2244BB); g.fillRect(10,31,18,17); g.fillRect(8,46,11,18); g.fillRect(21,46,11,18);
+  g.fillStyle(0xFFD700); g.fillCircle(13,34,2); g.fillCircle(25,34,2);
+  g.fillStyle(0x1A9900); g.fillRect(0,30,12,18); g.fillRect(30,30,12,18);
+  g.fillStyle(0xFFFFFF); g.fillCircle(5,49,6); g.fillCircle(37,49,6);
+  g.fillStyle(0x3D1A00); g.fillRect(4,62,17,7); g.fillRect(20,62,17,7);
+  g.fillStyle(0x7B3F0E); g.fillRect(41,7,6,14);
+  g.fillStyle(0xC8A060); g.fillRect(39,21,10,36);
+}
+
+function drawFortnite(g) {
+  g.fillStyle(0x2E3B55); g.fillCircle(20,13,14);       // helmet dome
+  g.fillStyle(0x1A2840); g.fillRect(8,8,24,14);        // face shield area
+  g.fillStyle(0xFFCC00); g.fillRect(10,12,22,7);       // gold visor
+  g.fillStyle(0x3D4E66); g.fillRect(8,3,9,7); g.fillRect(25,3,9,7); // helmet details
+  g.fillStyle(0x2E3B55); g.fillRect(13,22,14,6);       // chin
+  g.fillStyle(0x2D3B55); g.fillRect(7,28,26,22);       // tactical vest
+  g.fillStyle(0x1A2840); g.fillRect(9,31,8,9); g.fillRect(25,31,8,9); // vest pockets
+  g.fillStyle(0x3D4E66); g.fillRect(0,28,9,20); g.fillRect(33,28,9,20); // sleeves
+  g.fillStyle(0x111122); g.fillRect(0,46,10,8); g.fillRect(32,46,10,8); // gloves
+  g.fillStyle(0x8B7355); g.fillRect(8,48,11,16); g.fillRect(21,48,11,16); // cargo pants
+  g.fillStyle(0x7A6244); g.fillRect(9,52,8,6); g.fillRect(22,52,8,6);    // pockets
+  g.fillStyle(0x1A1208); g.fillRect(5,62,16,7); g.fillRect(20,62,16,7); // boots
+  g.fillStyle(0x7B3F0E); g.fillRect(41,7,6,14);
+  g.fillStyle(0xC8A060); g.fillRect(39,21,10,36);
+}
+
+function drawSteve(g) {
+  // All rectangles — Minecraft style!
+  g.fillStyle(0x9B7038); g.fillRect(8,2,26,26);        // face
+  g.fillStyle(0x9B7038); g.fillRect(4,8,6,14); g.fillRect(34,8,6,14); // ears
+  g.fillStyle(0x4B2A0A); g.fillRect(8,2,26,7);          // hair
+  g.fillStyle(0xFFFFFF); g.fillRect(11,11,7,7); g.fillRect(24,11,7,7); // eye whites
+  g.fillStyle(0x4488FF); g.fillRect(12,12,4,5); g.fillRect(25,12,4,5); // irises
+  g.fillStyle(0x000000); g.fillRect(13,13,2,2); g.fillRect(26,13,2,2); // pupils
+  g.fillStyle(0x7A5520); g.fillRect(19,18,6,4);         // nose
+  g.fillStyle(0x1A0A00); g.fillRect(14,23,14,4);        // mouth
+  g.fillStyle(0x1E5799); g.fillRect(7,28,26,20);        // blue shirt
+  g.fillStyle(0x9B7038); g.fillRect(0,28,9,22); g.fillRect(35,28,9,22); // arms (skin)
+  g.fillStyle(0x1A2E8A); g.fillRect(8,46,11,18); g.fillRect(21,46,11,18); // pants
+  g.fillStyle(0x555555); g.fillRect(6,62,14,7); g.fillRect(21,62,14,7); // boots
+  g.fillStyle(0x7B3F0E); g.fillRect(41,7,6,14);
+  g.fillStyle(0xC8A060); g.fillRect(39,21,10,36);
+}
+
+function drawNinja(g) {
+  // Black pants + legs
+  g.fillStyle(0x111111); g.fillRect(8,48,11,18); g.fillRect(21,48,11,18);
+  // Sandals
+  g.fillStyle(0x6B3A2A); g.fillRect(6,64,15,5); g.fillRect(21,64,15,5);
+  // Black gi body
+  g.fillStyle(0x111111); g.fillRect(7,26,26,24);
+  // Dark blue gi collar fold (V shape)
+  g.fillStyle(0x0D1A33); g.fillTriangle(20,26, 14,40, 20,40); g.fillTriangle(20,26, 26,40, 20,40);
+  // White obi belt
+  g.fillStyle(0xDDDDDD); g.fillRect(8,38,24,5);
+  // Black sleeves
+  g.fillStyle(0x111111); g.fillRect(0,26,9,22); g.fillRect(33,26,9,22);
+  // Dark gloves
+  g.fillStyle(0x1A1A1A); g.fillCircle(4,48,6); g.fillCircle(37,48,6);
+  // Head wrap (all black)
+  g.fillStyle(0x111111); g.fillCircle(20,14,14);
+  // Eye slit background (skin peek)
+  g.fillStyle(0x3A2211); g.fillRect(10,12,22,6);
+  // Glowing white eyes
+  g.fillStyle(0xFFFFFF); g.fillRect(11,13,7,4); g.fillRect(24,13,7,4);
+  // Red pupils
+  g.fillStyle(0xFF1100); g.fillRect(13,14,3,2); g.fillRect(26,14,3,2);
+  // Red headband
+  g.fillStyle(0xCC0000); g.fillRect(7,8,26,5);
+  // Headband tail hanging on right
+  g.fillStyle(0xAA0000); g.fillRect(32,8,5,16);
+  // Lower face wrap (covers nose/mouth)
+  g.fillStyle(0x111111); g.fillRect(8,17,24,10);
+  // Bat
+  g.fillStyle(0x7B3F0E); g.fillRect(41,7,6,14);
+  g.fillStyle(0xC8A060); g.fillRect(39,21,10,36);
+}
+
+function drawWolf(g) {
+  // Dark gray pointy ears (taller than fox)
+  g.fillStyle(0x666677); g.fillTriangle(9,0, 4,13, 17,13);
+  g.fillStyle(0x666677); g.fillTriangle(31,0, 23,13, 36,13);
+  // Light inner ears
+  g.fillStyle(0xBBAAAA); g.fillTriangle(9,3, 7,12, 16,12);
+  g.fillStyle(0xBBAAAA); g.fillTriangle(31,3, 24,12, 34,12);
+  // Gray head
+  g.fillStyle(0x778888); g.fillCircle(20,16,13);
+  // Light muzzle (wider/blockier than fox)
+  g.fillStyle(0xCCCCBB); g.fillEllipse(20,23,18,12);
+  // Golden wolf eyes
+  g.fillStyle(0x111100); g.fillCircle(14,13,4); g.fillCircle(26,13,4);
+  g.fillStyle(0xCCAA00); g.fillCircle(14,13,2.5); g.fillCircle(26,13,2.5);
+  g.fillStyle(0x000000); g.fillCircle(14,14,1.5); g.fillCircle(26,14,1.5);
+  g.fillStyle(0xFFFFFF); g.fillCircle(15,12,1); g.fillCircle(27,12,1);
+  // Dark oval nose
+  g.fillStyle(0x111111); g.fillEllipse(20,20,7,5);
+  // Gray body
+  g.fillStyle(0x667788); g.fillRect(8,28,24,24);
+  // White/cream chest
+  g.fillStyle(0xDDDDCC); g.fillEllipse(20,39,16,22);
+  // Gray arms
+  g.fillStyle(0x667788); g.fillRect(0,28,10,22); g.fillRect(32,28,10,22);
+  // Dark paw tips (hands)
+  g.fillStyle(0x445566); g.fillRect(0,47,10,5); g.fillRect(32,47,10,5);
+  // Gray legs
+  g.fillStyle(0x667788); g.fillRect(9,50,10,16); g.fillRect(21,50,10,16);
+  // Dark paws (feet)
+  g.fillStyle(0x445566); g.fillRect(7,64,13,5); g.fillRect(20,64,13,5);
+  // Bat
+  g.fillStyle(0x7B3F0E); g.fillRect(41,7,6,14);
+  g.fillStyle(0xC8A060); g.fillRect(39,21,10,36);
+}
+
+function drawFox(g) {
+  // Pointy orange ears
+  g.fillStyle(0xFF6600); g.fillTriangle(10,1, 5,12, 16,12);  // left ear
+  g.fillStyle(0xFF6600); g.fillTriangle(30,1, 24,12, 35,12); // right ear
+  // Pink inner ears
+  g.fillStyle(0xFFAAAA); g.fillTriangle(10,4, 8,11, 15,11);
+  g.fillStyle(0xFFAAAA); g.fillTriangle(30,4, 25,11, 33,11);
+  // Orange head
+  g.fillStyle(0xFF6600); g.fillCircle(20,16,13);
+  // White muzzle
+  g.fillStyle(0xF5E6C8); g.fillEllipse(20,23,16,11);
+  // Amber eyes with dark pupils
+  g.fillStyle(0x111100); g.fillCircle(14,14,4); g.fillCircle(26,14,4);
+  g.fillStyle(0xDDAA00); g.fillCircle(14,14,2.5); g.fillCircle(26,14,2.5);
+  g.fillStyle(0x000000); g.fillCircle(14,14,1.5); g.fillCircle(26,14,1.5);
+  g.fillStyle(0xFFFFFF); g.fillCircle(15,13,1); g.fillCircle(27,13,1); // shine
+  // Nose
+  g.fillStyle(0x111111); g.fillTriangle(18,19, 22,19, 20,22);
+  // Mouth lines
+  g.fillStyle(0xCC4400); g.fillRect(17,22,2,4); g.fillRect(21,22,2,4);
+  // Orange body
+  g.fillStyle(0xFF6600); g.fillRect(8,28,24,24);
+  // Cream chest
+  g.fillStyle(0xFFF5E0); g.fillEllipse(20,39,16,22);
+  // Orange arms
+  g.fillStyle(0xFF6600); g.fillRect(0,28,10,22); g.fillRect(32,28,10,22);
+  // Darker paw tips on hands
+  g.fillStyle(0xCC4400); g.fillRect(0,47,10,5); g.fillRect(32,47,10,5);
+  // Orange legs
+  g.fillStyle(0xFF6600); g.fillRect(9,50,10,16); g.fillRect(21,50,10,16);
+  // Paws on feet
+  g.fillStyle(0xCC4400); g.fillRect(7,64,13,5); g.fillRect(20,64,13,5);
+  // Bat
+  g.fillStyle(0x7B3F0E); g.fillRect(41,7,6,14);
+  g.fillStyle(0xC8A060); g.fillRect(39,21,10,36);
+}
+
+function drawGorilla(g) {
+  g.fillStyle(0x4A2800); g.fillCircle(20,42,20);        // body
+  g.fillStyle(0x5C3317); g.fillCircle(20,16,15);        // head
+  g.fillStyle(0x7B5030); g.fillEllipse(20,20,20,16);   // face plate
+  g.fillStyle(0xFF1A00); g.fillRect(5,11,30,9);         // VR headset strap
+  g.fillStyle(0x0A0A1A); g.fillCircle(14,15,5); g.fillCircle(26,15,5); // lenses
+  g.fillStyle(0x2233AA); g.fillCircle(13,14,3); g.fillCircle(25,14,3); // lens glow
+  g.fillStyle(0x1A0A00); g.fillCircle(17,24,2); g.fillCircle(23,24,2); // nostrils
+  g.fillStyle(0x4A2800); g.fillRect(0,32,12,26); g.fillRect(30,32,10,26); // long arms
+  g.fillStyle(0x2D1400); g.fillCircle(6,58,8); g.fillCircle(35,58,8);  // knuckle hands
+  g.fillStyle(0x4A2800); g.fillRect(10,54,10,14); g.fillRect(22,54,10,14); // legs
+  g.fillStyle(0x2D1400); g.fillRect(7,64,14,4); g.fillRect(21,64,14,4); // feet
+  g.fillStyle(0x7B3F0E); g.fillRect(40,30,6,14);        // bat handle (held low)
+  g.fillStyle(0xC8A060); g.fillRect(38,44,10,22);       // bat barrel
+}
+
+// ── SHOP SCENE ─────────────────────────────────────────────────────────────
+class ShopScene extends Phaser.Scene {
+  constructor() { super('ShopScene'); }
+
+  create() {
+    const W = 800, H = 500;
+
+    // Generate all preview textures
+    SKINS.forEach(s => genTex(this, 'prev_' + s.key, s.draw));
+
+    // Background
+    this.add.rectangle(W/2, H/2, W, H, 0x080818);
+    for (let i = 0; i < 80; i++) {
+      this.add.circle(
+        Phaser.Math.Between(0, W), Phaser.Math.Between(0, 180),
+        Phaser.Math.Between(1, 2), 0xFFFFFF,
+        Phaser.Math.FloatBetween(0.2, 0.9)
+      );
+    }
+    this.add.rectangle(W/2, H/2, W, H, 0x000033, 0.3);
+
+    // Title
+    this.add.text(W/2, 38, '🛒  SKIN SHOP', {
+      fontSize: '42px', fontFamily: 'Arial Black',
+      color: '#FFD700', stroke: '#000', strokeThickness: 6
+    }).setOrigin(0.5);
+
+    // Card layout: 7 cards → centers at 57, 171, 286, 400, 514, 629, 743
+    this.cardX  = [57, 171, 286, 400, 514, 629, 743];
+    const CY = 265, CW = 100, CH = 220;
+    const equipped = this.registry.get('skinIndex') || 0;
+
+    SKINS.forEach((skin, i) => {
+      const x = this.cardX[i];
+
+      // Card BG
+      this.add.rectangle(x, CY, CW, CH, 0x121230);
+      this.add.rectangle(x, CY, CW, CH, 0x000000, 0).setStrokeStyle(2, 0x2233AA);
+
+      // Character preview (scaled up)
+      this.add.sprite(x, CY - 28, 'prev_' + skin.key).setScale(1.4).setDepth(2);
+
+      // Name
+      this.add.text(x, CY + 76, skin.name, {
+        fontSize: '20px', fontFamily: 'Arial Black',
+        color: '#ffffff', stroke: '#000', strokeThickness: 3
+      }).setOrigin(0.5).setDepth(2);
+
+      // Desc
+      this.add.text(x, CY + 100, skin.desc, {
+        fontSize: '13px', fontFamily: 'Arial', color: '#888888'
+      }).setOrigin(0.5).setDepth(2);
+
+      // Equipped badge
+      if (i === equipped) {
+        const badge = this.add.rectangle(x, CY - 120, 100, 22, 0x1A8800).setDepth(3);
+        this.add.text(x, CY - 120, '✓ EQUIPPED', {
+          fontSize: '12px', fontFamily: 'Arial Black', color: '#ffffff'
+        }).setOrigin(0.5).setDepth(4);
+      }
+    });
+
+    // Gold selection highlight
+    this.sel = this.registry.get('skinIndex') || 0;
+    this.highlight = this.add.rectangle(this.cardX[this.sel], CY, CW + 10, CH + 10, 0, 0);
+    this.highlight.setStrokeStyle(5, 0xFFD700).setDepth(5);
+
+    // Selector arrows + skin name
+    this.selText = this.add.text(W/2, 420, '', {
+      fontSize: '22px', fontFamily: 'Arial Black',
+      color: '#FFD700', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5);
+    this.updateSel();
+
+    // Controls hint
+    this.add.text(W/2, 464, '← →  Browse      SPACE  Equip      ESC  Back', {
+      fontSize: '15px', fontFamily: 'Arial', color: '#555577'
+    }).setOrigin(0.5);
+
+    // Input
+    this.cursors  = this.input.keyboard.createCursorKeys();
+    this.spaceKey = this.input.keyboard.addKey('SPACE');
+    this.escKey   = this.input.keyboard.addKey('ESC');
+  }
+
+  update() {
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.left))  this.move(-1);
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.right)) this.move(1);
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) this.equip();
+    if (Phaser.Input.Keyboard.JustDown(this.escKey))   this.scene.start('TitleScene');
+  }
+
+  move(dir) {
+    this.sel = (this.sel + dir + SKINS.length) % SKINS.length;
+    this.highlight.setPosition(this.cardX[this.sel], 265);
+    this.updateSel();
+  }
+
+  updateSel() {
+    this.selText.setText('« ' + SKINS[this.sel].name + ' »');
+  }
+
+  equip() {
+    this.registry.set('skinIndex', this.sel);
+    this.registry.set('skinKey',   SKINS[this.sel].key);
+    // Flash + confirm
+    this.add.rectangle(400, 250, 800, 500, 0xFFD700, 0.5).setDepth(10);
+    this.add.text(400, 250, SKINS[this.sel].name + '  equipped!', {
+      fontSize: '38px', fontFamily: 'Arial Black',
+      color: '#000000', stroke: '#fff', strokeThickness: 5
+    }).setOrigin(0.5).setDepth(11);
+    this.time.delayedCall(650, () => this.scene.start('TitleScene'));
+  }
+}
+
+// ── TITLE SCENE ────────────────────────────────────────────────────────────
+// ── MAP SELECT SCENE ───────────────────────────────────────────────────────
+class MapSelectScene extends Phaser.Scene {
+  constructor() { super('MapSelectScene'); }
+
+  create() {
+    const W = 800, H = 500;
+
+    // Dark background
+    this.add.rectangle(W/2, H/2, W, H, 0x0A0A1E);
+    for (let i=0;i<60;i++) this.add.circle(Phaser.Math.Between(0,W),Phaser.Math.Between(0,160),Phaser.Math.Between(1,2),0xFFFFFF,Phaser.Math.FloatBetween(0.2,0.8));
+
+    this.add.text(W/2, 38, '🗺  PICK A MAP', {
+      fontSize: '42px', fontFamily: 'Arial Black',
+      color: '#FFD700', stroke: '#000', strokeThickness: 6
+    }).setOrigin(0.5);
+
+    // Four cards — centers at 100, 300, 500, 700
+    this.cardX = [100, 300, 500, 700];
+    const CY = 270, CW = 170, CH = 260;
+    this.sel = this.registry.get('mapIndex') || 0;
+
+    MAPS.forEach((map, i) => {
+      const x = this.cardX[i];
+
+      // Card BG
+      this.add.rectangle(x, CY, CW, CH, 0x101028);
+      this.add.rectangle(x, CY, CW, CH, 0,0).setStrokeStyle(2, 0x2233AA);
+
+      // Mini map preview (scaled-down thumbnail)
+      const previewW = 152, previewH = 100;
+      const px = x, py = CY - 42;
+      const scaleX = previewW / 800, scaleY = previewH / 500;
+
+      // Sky background of thumbnail
+      this.add.rectangle(px, py, previewW, previewH, map.bgColor).setDepth(1);
+
+      // Platform rectangles scaled down
+      map.platforms.forEach(([mx, my, mw, mh]) => {
+        const tx = px + (mx - 400) * scaleX;
+        const ty = py + (my - 250) * scaleY;
+        this.add.rectangle(tx, ty, mw * scaleX, Math.max(4, mh * scaleY), map.platColor).setDepth(2);
+        this.add.rectangle(tx, ty - mh * scaleY / 2 + 2, mw * scaleX, 3, map.trimColor).setDepth(3);
+      });
+
+      // Clip border around preview
+      this.add.rectangle(px, py, previewW + 2, previewH + 2, 0,0).setStrokeStyle(2, 0x334466).setDepth(4);
+
+      // Name + desc
+      this.add.text(x, CY + 96, map.name, {
+        fontSize: '24px', fontFamily: 'Arial Black', color: '#ffffff', stroke: '#000', strokeThickness: 3
+      }).setOrigin(0.5).setDepth(5);
+      this.add.text(x, CY + 122, map.desc, {
+        fontSize: '15px', fontFamily: 'Arial', color: '#888888'
+      }).setOrigin(0.5).setDepth(5);
+
+      // Equipped badge
+      if (i === this.sel) {
+        this.add.rectangle(x, CY - 142, 110, 22, 0x1A8800).setDepth(5);
+        this.add.text(x, CY - 142, '✓ SELECTED', {
+          fontSize: '12px', fontFamily: 'Arial Black', color: '#fff'
+        }).setOrigin(0.5).setDepth(6);
+      }
+    });
+
+    // Selection highlight
+    this.highlight = this.add.rectangle(this.cardX[this.sel], CY, CW+10, CH+10, 0,0);
+    this.highlight.setStrokeStyle(5, 0xFFD700).setDepth(7);
+
+    this.selText = this.add.text(W/2, 428, '', {
+      fontSize: '22px', fontFamily: 'Arial Black', color: '#FFD700', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5);
+    this.updateSel();
+
+    this.add.text(W/2, 467, '← →  Browse      SPACE  Pick      ESC  Back', {
+      fontSize: '15px', fontFamily: 'Arial', color: '#555577'
+    }).setOrigin(0.5);
+
+    this.cursors  = this.input.keyboard.createCursorKeys();
+    this.spaceKey = this.input.keyboard.addKey('SPACE');
+    this.escKey   = this.input.keyboard.addKey('ESC');
+  }
+
+  update() {
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.left))  this.move(-1);
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.right)) this.move(1);
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) this.pick();
+    if (Phaser.Input.Keyboard.JustDown(this.escKey))   this.scene.start('TitleScene');
+  }
+
+  move(dir) {
+    this.sel = (this.sel + dir + MAPS.length) % MAPS.length;
+    this.highlight.setPosition(this.cardX[this.sel], 270);
+    this.updateSel();
+  }
+
+  updateSel() { this.selText.setText('« ' + MAPS[this.sel].name + ' »'); }
+
+  pick() {
+    this.registry.set('mapIndex', this.sel);
+    const flash = this.add.rectangle(400, 250, 800, 500, 0xFFFFFF, 0.4).setDepth(10);
+    this.add.text(400, 250, MAPS[this.sel].name + '  selected!', {
+      fontSize: '38px', fontFamily: 'Arial Black', color: '#000', stroke: '#fff', strokeThickness: 5
+    }).setOrigin(0.5).setDepth(11);
+    this.time.delayedCall(600, () => this.scene.start('TitleScene'));
+  }
+}
+
+// ── TITLE SCENE ────────────────────────────────────────────────────────────
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+
+  create() {
+    const W = 800, H = 500;
+
+    // Background
+    this.add.rectangle(W/2, H/2, W, H, 0x87CEEB);
+    this.add.rectangle(W/2, H-25, W, 50, 0x228B22);
+    this.add.rectangle(W/2, 75, W, 150, 0xC8A06B).setAlpha(0.55);
+    for (let i = 0; i < 22; i++) {
+      const c = [0xFF2222,0x2266FF,0xFFDD00,0xFF69B4,0x00CED1][i%5];
+      this.add.circle(i*37+5, 70, 13, c);
+      this.add.rectangle(i*37+5, 92, 17, 26, c);
+    }
+
+    // Title
+    this.add.rectangle(W/2, 185, 700, 90, 0x000000, 0.65);
+    this.add.text(W/2, 185, '⚾  BASEBALL BRAWL  ⚾', {
+      fontSize: '44px', fontFamily: 'Arial Black',
+      color: '#FFD700', stroke: '#000', strokeThickness: 6
+    }).setOrigin(0.5);
+
+    // Controls
+    this.add.rectangle(W/2, 278, 560, 78, 0x000000, 0.55);
+    this.add.text(W/2, 263, '← →  Move      ↑  Jump', {
+      fontSize: '21px', fontFamily: 'Arial', color: '#ffffff'
+    }).setOrigin(0.5);
+    this.add.text(W/2, 292, 'SPACE  Swing Bat', {
+      fontSize: '21px', fontFamily: 'Arial', color: '#FFD700'
+    }).setOrigin(0.5);
+
+    // Skin + map info
+    const skinKey  = this.registry.get('skinKey') || 'mario';
+    const skinName = (SKINS.find(s => s.key === skinKey) || SKINS[0]).name;
+    const mapIndex = this.registry.get('mapIndex') || 0;
+    const mapName  = MAPS[mapIndex].name;
+    this.add.text(W/2, 324, 'Skin: ' + skinName + '    Map: ' + mapName, {
+      fontSize: '14px', fontFamily: 'Arial', color: '#aaffaa', stroke: '#000', strokeThickness: 2
+    }).setOrigin(0.5);
+
+    // Rank badge
+    const wins = getWins();
+    const rank = getRank(wins);
+    const next = getNextRank(wins);
+    this.add.rectangle(W/2, 348, 420, 26, 0x000000, 0.5);
+    this.add.text(W/2, 348, rank.icon + '  ' + rank.name + '  —  ' + wins + ' win' + (wins !== 1 ? 's' : ''), {
+      fontSize: '16px', fontFamily: 'Arial Black', color: rank.color, stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5);
+    // Progress to next rank
+    const progressTxt = next
+      ? wins + ' / ' + next.min + ' wins to ' + next.icon + ' ' + next.name
+      : '🏆 MAX RANK ACHIEVED!';
+    this.add.text(W/2, 366, progressTxt, {
+      fontSize: '12px', fontFamily: 'Arial', color: '#888888'
+    }).setOrigin(0.5);
+
+    // Mode buttons
+    const b1 = this.add.rectangle(W/2 - 140, 400, 220, 46, 0xAA1100);
+    this.add.text(W/2 - 140, 400, '⚾  FIGHT  (F)', {
+      fontSize: '22px', fontFamily: 'Arial Black', color: '#fff', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5);
+
+    const b2 = this.add.rectangle(W/2 + 140, 400, 220, 46, 0x1A9900);
+    this.add.text(W/2 + 140, 400, '🏋  PRACTICE', {
+      fontSize: '24px', fontFamily: 'Arial Black', color: '#fff', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5);
+
+    // Hints
+    this.add.text(W/2, 454, 'S = Skin Shop      M = Change Map', {
+      fontSize: '15px', fontFamily: 'Arial', color: '#FFD700', stroke: '#000', strokeThickness: 2
+    }).setOrigin(0.5);
+
+    this.tweens.add({ targets: [b1, b2], alpha: 0.7, duration: 550, yoyo: true, repeat: -1 });
+
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene', { mode: 'fight'    }));
+    this.input.keyboard.once('keydown-F',     () => this.scene.start('GameScene', { mode: 'fight'    }));
+    this.input.keyboard.once('keydown-P',     () => this.scene.start('GameScene', { mode: 'practice' }));
+    this.input.keyboard.once('keydown-S',     () => this.scene.start('ShopScene'));
+    this.input.keyboard.once('keydown-M',     () => this.scene.start('MapSelectScene'));
+  }
+}
+
+// ── GAME SCENE ─────────────────────────────────────────────────────────────
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+
+  create() {
+    const W = 800, H = 500;
+    this.mode = (this.scene.settings.data && this.scene.settings.data.mode) || 'fight';
+
+    // Build player texture from selected skin
+    const skinKey = this.registry.get('skinKey') || 'mario';
+    const skin = SKINS.find(s => s.key === skinKey) || SKINS[0];
+    genTex(this, 'ptex', skin.draw);
+    genTex(this, 'etex', drawLuigi);
+
+    // Map background + platforms
+    const mapIndex = this.registry.get('mapIndex') || 0;
+    this.currentMap = MAPS[mapIndex];
+    if (this.currentMap.endless) this.mode = 'practice'; // endless always forces practice
+    this.currentMap.drawBG(this, W, H);
+
+    this.platforms = this.physics.add.staticGroup();
+    this.currentMap.platforms.forEach(([x,y,w,h]) => this.addPlatform(x, y, w, h, this.currentMap.platColor, this.currentMap.trimColor));
+
+    // Fighters
+    this.p1 = this.makeFighter(200, 390, 'ptex');
+    this.p2 = this.makeFighter(600, 390, 'etex');
+    this.p2.face = -1;
+    this.p2.s.setFlipX(true);
+
+    this.physics.add.collider(this.p1.s, this.platforms);
+    this.physics.add.collider(this.p2.s, this.platforms);
+
+    // Endless map: lock fighters inside screen so they can never fall off
+    if (this.currentMap.endless) {
+      this.p1.s.setCollideWorldBounds(true);
+      this.p2.s.setCollideWorldBounds(true);
+    }
+
+    // Input
+    this.cursors  = this.input.keyboard.createCursorKeys();
+    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+    // Bat FX
+    this.bat1 = this.add.rectangle(-999,-999,62,12,0xFFD700).setDepth(5).setVisible(false);
+    this.bat2 = this.add.rectangle(-999,-999,62,12,0xFFD700).setDepth(5).setVisible(false);
+
+    // Game state
+    this.p1lives = 3; this.p2lives = 3;
+    this.p1atk = 0;   this.p2atk = 0;
+    this.p1inv = 0;   this.p2inv = 0;
+    this.p1resp = 0;  this.p2resp = 0;
+    this.aiTick = 0;
+    this.over = false;
+
+    // UI
+    this.ui1 = this.add.text(12, 8, '', {
+      fontSize: '22px', color: '#5599FF', stroke: '#000', strokeThickness: 3
+    }).setDepth(15);
+    this.ui2 = this.add.text(W-12, 8, '', {
+      fontSize: '22px', color: '#22CC22', stroke: '#000', strokeThickness: 3
+    }).setOrigin(1,0).setDepth(15);
+    this.add.text(12,  32, skin.name.toUpperCase(), {
+      fontSize: '13px', color: '#5599FF', stroke: '#000', strokeThickness: 2
+    }).setDepth(15);
+    this.add.text(W-12, 32, 'LUIGI', {
+      fontSize: '13px', color: '#22CC22', stroke: '#000', strokeThickness: 2
+    }).setOrigin(1,0).setDepth(15);
+    this.refreshLives();
+
+    // Practice / Endless banner
+    if (this.mode === 'practice') {
+      const isEndless = this.currentMap.endless;
+      const bannerColor = isEndless ? 0x440088 : 0x1A9900;
+      const bannerText  = isEndless ? '♾  ENDLESS — Can\'t fall off! Smash away!' : '🏋  PRACTICE — Luigi won\'t attack!';
+      this.add.rectangle(W/2, 16, isEndless ? 370 : 300, 30, bannerColor, 0.9).setDepth(14);
+      this.add.text(W/2, 16, bannerText, {
+        fontSize: '13px', fontFamily: 'Arial Black', color: '#ffffff'
+      }).setOrigin(0.5).setDepth(15);
+      this.add.text(W/2, H - 14, 'Press R to reset Luigi', {
+        fontSize: '13px', fontFamily: 'Arial', color: '#aaaaaa'
+      }).setOrigin(0.5).setDepth(15);
+      this.input.keyboard.on('keydown-R', () => this.doRespawn(this.p2, false));
+
+      // Menu button (bottom-right) — leave practice any time
+      const menuBtn = this.add.rectangle(W - 62, H - 16, 104, 28, 0xAA1100).setDepth(16)
+        .setInteractive({ useHandCursor: true });
+      this.add.text(W - 62, H - 16, '☰ MENU (ESC)', {
+        fontSize: '13px', fontFamily: 'Arial Black', color: '#ffffff'
+      }).setOrigin(0.5).setDepth(17);
+      const toMenu = () => this.scene.start('TitleScene');
+      menuBtn.on('pointerdown', toMenu);
+      this.input.keyboard.on('keydown-ESC', toMenu);
+    }
+
+    // FIGHT! / PRACTICE! splash
+    const ft = this.add.text(W/2, H/2-20, this.mode === 'practice' ? 'PRACTICE!' : 'FIGHT!', {
+      fontSize: '88px', fontFamily: 'Arial Black',
+      color: '#FFD700', stroke: '#000', strokeThickness: 9
+    }).setOrigin(0.5).setDepth(25);
+    this.tweens.add({ targets: ft, scaleX: 2, scaleY: 2, alpha: 0, duration: 900,
+      onComplete: () => ft.destroy() });
+  }
+
+  addPlatform(x, y, w, h, col, trimCol = 0x3AAA3A) {
+    const r = this.add.rectangle(x, y, w, h, col);
+    this.physics.add.existing(r, true);
+    this.platforms.add(r);
+    this.add.rectangle(x, y - h/2 + 4, w, 8, trimCol);
+  }
+
+  makeFighter(x, y, tex) {
+    const s = this.physics.add.sprite(x, y, tex);
+    s.setCollideWorldBounds(false);
+    s.setBounce(0.04);
+    s.setDragX(360);
+    s.setDepth(4);
+    const dt = this.add.text(x, y-44, '0%', {
+      fontSize: '19px', fontFamily: 'Arial Black',
+      color: '#ffffff', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5).setDepth(8);
+    return { s, dt, dmg: 0, face: 1 };
+  }
+
+  refreshLives() {
+    const dots = n => '● '.repeat(Math.max(0,n)).trim();
+    this.ui1.setText('YOU  ' + dots(this.p1lives));
+    this.ui2.setText(dots(this.p2lives) + '  CPU');
+  }
+
+  swing(atk, def, batFX) {
+    batFX.setPosition(atk.s.x + atk.face * 42, atk.s.y - 5);
+    batFX.setRotation(atk.face * 0.3);
+    batFX.setVisible(true);
+    this.time.delayedCall(200, () => batFX.setVisible(false));
+
+    const dx = Math.abs(atk.s.x - def.s.x);
+    const dy = Math.abs(atk.s.y - def.s.y);
+    if (dx < 90 && dy < 58) {
+      const defInv = (def === this.p1) ? this.p1inv : this.p2inv;
+      if (defInv > 0) return;
+
+      def.dmg = Math.min(def.dmg + 18, 200);
+      def.dt.setText(def.dmg + '%');
+      def.dt.setColor(def.dmg > 100 ? '#FF2200' : def.dmg > 50 ? '#FF8800' : '#ffffff');
+
+      const power  = 1 + def.dmg / 72;
+      const kbDir  = def.s.x > atk.s.x ? 1 : -1;
+      def.s.setVelocity(kbDir * 345 * power, -275 * power);
+
+      if (def === this.p1) this.p1inv = 55; else this.p2inv = 55;
+      this.cameras.main.shake(130, 0.009);
+      this.hitSound(def.dmg);
+    }
+  }
+
+  hitSound(dmg) {
+    try {
+      const ac = new (window.AudioContext || window.webkitAudioContext)();
+      const o = ac.createOscillator(), gn = ac.createGain();
+      o.connect(gn); gn.connect(ac.destination);
+      const f = dmg > 100 ? 160 : dmg > 50 ? 220 : 310;
+      o.frequency.setValueAtTime(f * 2.2, ac.currentTime);
+      o.frequency.exponentialRampToValueAtTime(f * 0.45, ac.currentTime + 0.13);
+      gn.gain.setValueAtTime(0.35, ac.currentTime);
+      gn.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.13);
+      o.start(); o.stop(ac.currentTime + 0.13);
+    } catch(e) {}
+  }
+
+  checkFall(f, isP1) {
+    if (f.s.y > 570 || f.s.x < -130 || f.s.x > 930) {
+      if (this.mode === 'practice') { this.doRespawn(f, isP1); return; }
+      if (isP1) this.p1lives--; else this.p2lives--;
+      this.refreshLives();
+      if ((isP1 ? this.p1lives : this.p2lives) > 0) {
+        f.s.setPosition(-400, -300); f.s.setVelocity(0, 0);
+        if (isP1) this.p1resp = 85; else this.p2resp = 85;
+      }
+      if (this.p1lives <= 0 || this.p2lives <= 0) this.endGame();
+    }
+  }
+
+  doRespawn(f, isP1) {
+    f.s.setPosition(isP1 ? 200 : 600, 120);
+    f.s.setVelocity(0, 0);
+    f.dmg = 0; f.dt.setText('0%').setColor('#ffffff');
+    if (isP1) { this.p1inv = 130; this.p1resp = 0; }
+    else       { this.p2inv = 130; this.p2resp = 0; }
+  }
+
+  runAI() {
+    if (this.p2resp > 0 || this.over) return;
+    const dx = this.p1.s.x - this.p2.s.x;
+    const dy = this.p1.s.y - this.p2.s.y;
+    const dist = Math.abs(dx);
+    this.aiTick++;
+
+    if (dist > 82) {
+      const d = dx > 0 ? 1 : -1;
+      this.p2.s.setVelocityX(d * 200);
+      this.p2.face = d;
+    } else {
+      this.p2.s.setVelocityX(this.p2.s.body.velocity.x * 0.7);
+    }
+
+    if (this.p2.s.body.blocked.down) {
+      if (dy < -95) this.p2.s.setVelocityY(-545);
+      else if (this.aiTick % 115 === 0 && dist < 240) this.p2.s.setVelocityY(-545);
+    }
+
+    // No attacking in practice mode
+    if (this.mode !== 'practice' && dist < 90 && Math.abs(dy) < 62 && this.p2atk <= 0) {
+      this.p2.face = dx > 0 ? 1 : -1;
+      this.p2atk = 38 + Math.floor(Math.random() * 20);
+      this.swing(this.p2, this.p1, this.bat2);
+    }
+  }
+
+  endGame() {
+    if (this.over) return;
+    this.over = true;
+    const W = 800, H = 500, won = this.p1lives > 0;
+
+    // Count win only in real fight mode
+    let rankUp = false, newRank = null;
+    if (won && this.mode === 'fight' && !this.currentMap.endless) {
+      const prevRank = getRank(getWins());
+      addWin();
+      newRank = getRank(getWins());
+      rankUp = newRank.name !== prevRank.name;
+    }
+
+    this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.58).setDepth(20);
+    this.add.text(W/2, H/2 - 65, won ? '🏆  YOU WIN!  🏆' : '💀  LUIGI WINS!  💀', {
+      fontSize: '52px', fontFamily: 'Arial Black',
+      color: won ? '#FFD700' : '#22CC22', stroke: '#000', strokeThickness: 7
+    }).setOrigin(0.5).setDepth(21);
+
+    if (won && newRank) {
+      // Rank-up splash
+      if (rankUp) {
+        const flash = this.add.rectangle(W/2, H/2, W, H, 0xFFD700, 0.3).setDepth(22);
+        this.tweens.add({ targets: flash, alpha: 0, duration: 600 });
+        this.add.text(W/2, H/2 - 10, '⬆  RANK UP!', {
+          fontSize: '34px', fontFamily: 'Arial Black', color: '#FFD700', stroke: '#000', strokeThickness: 5
+        }).setOrigin(0.5).setDepth(23);
+        this.add.text(W/2, H/2 + 28, newRank.icon + '  ' + newRank.name, {
+          fontSize: '28px', fontFamily: 'Arial Black', color: newRank.color, stroke: '#000', strokeThickness: 4
+        }).setOrigin(0.5).setDepth(23);
+      } else {
+        const w = getWins(), nx = getNextRank(w);
+        this.add.text(W/2, H/2 + 8, newRank.icon + '  ' + newRank.name + '  —  ' + w + ' wins', {
+          fontSize: '22px', fontFamily: 'Arial Black', color: newRank.color, stroke: '#000', strokeThickness: 3
+        }).setOrigin(0.5).setDepth(21);
+        if (nx) this.add.text(W/2, H/2 + 34, w + ' / ' + nx.min + ' to ' + nx.icon + ' ' + nx.name, {
+          fontSize: '14px', fontFamily: 'Arial', color: '#aaaaaa'
+        }).setOrigin(0.5).setDepth(21);
+      }
+    } else if (!won) {
+      this.add.text(W/2, H/2 + 10, 'Give it another shot!', {
+        fontSize: '26px', fontFamily: 'Arial', color: '#ffffff', stroke: '#000', strokeThickness: 3
+      }).setOrigin(0.5).setDepth(21);
+    }
+
+    const rt = this.add.text(W/2, H/2 + 78, 'SPACE  Play Again    ESC  Title', {
+      fontSize: '22px', fontFamily: 'Arial Black', color: '#ffffff', stroke: '#000', strokeThickness: 3
+    }).setOrigin(0.5).setDepth(21);
+    this.tweens.add({ targets: rt, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
+    this.time.delayedCall(600, () => {
+      this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene', { mode: this.mode }));
+      this.input.keyboard.once('keydown-ESC',   () => this.scene.start('TitleScene'));
+    });
+  }
+
+  update() {
+    if (this.over) return;
+
+    if (this.p1atk > 0) this.p1atk--;
+    if (this.p2atk > 0) this.p2atk--;
+    if (this.p1inv  > 0) this.p1inv--;
+    if (this.p2inv  > 0) this.p2inv--;
+
+    if (this.p1resp > 0) { this.p1resp--; if (!this.p1resp) this.doRespawn(this.p1, true);  }
+    if (this.p2resp > 0) { this.p2resp--; if (!this.p2resp) this.doRespawn(this.p2, false); }
+
+    // Player input
+    if (!this.p1resp) {
+      if (this.cursors.left.isDown)       { this.p1.s.setVelocityX(-245); this.p1.face = -1; }
+      else if (this.cursors.right.isDown) { this.p1.s.setVelocityX(245);  this.p1.face =  1; }
+      if (this.cursors.up.isDown && this.p1.s.body.blocked.down) this.p1.s.setVelocityY(-555);
+      if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && this.p1atk <= 0) {
+        this.p1atk = 30;
+        this.swing(this.p1, this.p2, this.bat1);
+      }
+    }
+
+    this.runAI();
+
+    // Sync visuals
+    for (const [f, inv] of [[this.p1, this.p1inv], [this.p2, this.p2inv]]) {
+      f.dt.setPosition(f.s.x, f.s.y - 46);
+      f.s.setAlpha(inv > 0 ? (Math.floor(this.time.now / 75) % 2 === 0 ? 0.25 : 1) : 1);
+      f.s.setFlipX(f.face < 0);
+    }
+
+    if (!this.p1resp) this.checkFall(this.p1, true);
+    if (!this.p2resp) this.checkFall(this.p2, false);
+  }
+}
+
+// ── CONFIG ─────────────────────────────────────────────────────────────────
+const config = {
+  type: Phaser.AUTO,
+  width: 800, height: 500,
+  physics: {
+    default: 'arcade',
+    arcade: { gravity: { y: 690 }, debug: false }
+  },
+  scene: [TitleScene, ShopScene, MapSelectScene, GameScene]
+};
+new Phaser.Game(config);
+</script>
+</body>
+</html>

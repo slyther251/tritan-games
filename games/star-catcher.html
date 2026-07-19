@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Star Catcher</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+  create() {
+    this.cameras.main.setBackgroundColor('#1a1a2e');
+    this.add.text(400, 200, 'Star Catcher', { fontSize: '48px', fill: '#ffd700', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 300, 'Arrow keys to move\nBounce the ball to hit the stars!', { fontSize: '20px', fill: '#ffffff', fontFamily: 'Arial', align: 'center' }).setOrigin(0.5);
+    this.add.text(400, 420, 'Press SPACE to Start', { fontSize: '24px', fill: '#00ff88', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+  }
+}
+
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+  create() {
+    this.cameras.main.setBackgroundColor('#1a1a2e');
+    this.score = 0;
+    this.misses = 0;
+    this.maxMisses = 5;
+
+    // Player bucket
+    this.player = this.add.rectangle(400, 560, 80, 20, 0x00ff88);
+    this.physics.add.existing(this.player);
+    this.player.body.setCollideWorldBounds(true);
+    this.player.body.setImmovable(true);
+
+    // Stars group
+    this.stars = this.physics.add.group();
+
+    // Score and misses text
+    this.scoreText = this.add.text(16, 16, 'Stars: 0', { fontSize: '20px', fill: '#ffd700', fontFamily: 'Arial' });
+    this.missText = this.add.text(16, 44, 'Misses: 0 / 5', { fontSize: '20px', fill: '#ff6b6b', fontFamily: 'Arial' });
+
+    // Spawn up to 4 stars on screen at once
+    this.spawnTimer = this.time.addEvent({
+      delay: 1200,
+      callback: this.trySpawnStar,
+      callbackScope: this,
+      loop: true
+    });
+    // Start with 2 stars immediately
+    this.trySpawnStar();
+    this.trySpawnStar();
+
+    // Ball lives
+    this.ballLives = 3;
+    this.ballLivesText = this.add.text(784, 16, '● ● ●', { fontSize: '20px', fill: '#ff6600', fontFamily: 'Arial' }).setOrigin(1, 0);
+
+    // Bouncy ball
+    this.spawnBall();
+
+    // Restart sign
+    const signBg = this.add.rectangle(400, 585, 100, 26, 0x8B4513).setInteractive({ useHandCursor: true });
+    const signText = this.add.text(400, 585, 'RESTART', { fontSize: '14px', fill: '#ffffff', fontFamily: 'Arial', fontStyle: 'bold' }).setOrigin(0.5);
+    signBg.on('pointerover', () => signBg.setFillStyle(0xa0522d));
+    signBg.on('pointerout',  () => signBg.setFillStyle(0x8B4513));
+    signBg.on('pointerdown', () => this.scene.start('GameScene'));
+
+    // Debug output
+    this.debugText = this.add.text(16, 72, '', { fontSize: '13px', fill: '#00ffff', fontFamily: 'monospace' });
+    this.debugLog = [];
+
+    // Controls
+    this.cursors = this.input.keyboard.createCursorKeys();
+  }
+
+  spawnBall() {
+    if (this.ball) { this.ball.destroy(); }
+    this.ball = this.add.circle(400, 80, 14, 0xff6600);
+    this.physics.add.existing(this.ball);
+    this.ball.body.setGravityY(400);
+    this.ball.body.setBounce(0.85);
+    this.ball.body.setVelocity(Phaser.Math.Between(-220, 220), -180);
+    this.physics.add.collider(this.player, this.ball, this.hitBall, null, this);
+    this.physics.add.overlap(this.stars, this.ball, this.hitStar, null, this);
+  }
+
+  trySpawnStar() {
+    if (this.stars.getLength() >= 4) return;
+    const x = Phaser.Math.Between(60, 740);
+    const y = Phaser.Math.Between(60, 440);
+    const size = Phaser.Math.Between(10, 18);
+    const star = this.add.star(x, y, 5, size / 2, size, 0xffd700);
+    this.physics.add.existing(star);
+    star.body.setAllowGravity(false);
+    star.body.setImmovable(true);
+    this.stars.add(star);
+
+    // Gently bob up and down
+    this.tweens.add({ targets: star, y: y + 12, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+
+    // Auto-miss after 3.5 seconds — flash red then disappear
+    const lifetime = 3500 - Math.min(this.score * 30, 1500);
+    this.time.delayedCall(lifetime - 600, () => {
+      if (!star.active) return;
+      this.tweens.add({ targets: star, alpha: 0, duration: 150, yoyo: true, repeat: 3,
+        onComplete: () => {
+          if (!star.active) return;
+          star.destroy();
+          this.misses++;
+          this.missText.setText('Misses: ' + this.misses + ' / ' + this.maxMisses);
+          if (this.misses >= this.maxMisses) {
+            this.scene.start('GameOverScene', { score: this.score });
+          }
+        }
+      });
+    });
+  }
+
+  log(msg) {
+    const time = Math.floor(this.time.now / 100) / 10;
+    this.debugLog.unshift('[' + time + 's] ' + msg);
+    if (this.debugLog.length > 6) this.debugLog.pop();
+    this.debugText.setText(this.debugLog.join('\n'));
+  }
+
+  hitStar(star, ball) {
+    if (!star.active) return;
+    this.log('HIT STAR at (' + Math.floor(star.x) + ',' + Math.floor(star.y) + ')');
+    // Pop effect
+    this.tweens.add({ targets: star, scaleX: 1.6, scaleY: 1.6, alpha: 0, duration: 200,
+      onComplete: () => star.destroy()
+    });
+    this.score++;
+    this.scoreText.setText('Stars: ' + this.score);
+    // Bump ball slightly
+    ball.body.setVelocityY(ball.body.velocity.y * -0.9);
+  }
+
+  hitBall(player, ball) {
+    // Launch hard enough to reach the ceiling
+    ball.body.setVelocityY(-720);
+    ball.body.setVelocityX(ball.body.velocity.x + Phaser.Math.Between(-60, 60));
+    this.log('PADDLE HIT → vy=-720 vx=' + Math.floor(ball.body.velocity.x));
+    // Flash white briefly
+    this.ball.setFillStyle(0xffffff);
+    this.time.delayedCall(120, () => { if (this.ball) this.ball.setFillStyle(0xff6600); });
+  }
+
+  update() {
+    // Player movement
+    if (this.cursors.left.isDown) {
+      this.player.body.setVelocityX(-400);
+    } else if (this.cursors.right.isDown) {
+      this.player.body.setVelocityX(400);
+    } else {
+      this.player.body.setVelocityX(0);
+    }
+
+    // Manual wall bouncing for ball (left, right, top only — bottom is open)
+    if (this.ball && this.ball.active) {
+      if (this.ball.x < 14)  { this.ball.x = 14;  this.ball.body.setVelocityX( Math.abs(this.ball.body.velocity.x)); this.log('WALL LEFT bounce'); }
+      if (this.ball.x > 786) { this.ball.x = 786; this.ball.body.setVelocityX(-Math.abs(this.ball.body.velocity.x)); this.log('WALL RIGHT bounce'); }
+      if (this.ball.y < 14)  { this.ball.y = 14;  this.ball.body.setVelocityY( Math.abs(this.ball.body.velocity.y)); this.log('CEILING bounce'); }
+      if (this.ball.y > 620) {
+        this.log('FELL OUT — lives left: ' + (this.ballLives - 1));
+        this.ball.destroy();
+        this.ballLives--;
+        const dots = '● '.repeat(this.ballLives).trim();
+        this.ballLivesText.setText(dots || '');
+        if (this.ballLives > 0) {
+          this.time.delayedCall(600, () => { if (this.scene.isActive()) this.spawnBall(); });
+        }
+      }
+    }
+
+  }
+}
+
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  create(data) {
+    this.cameras.main.setBackgroundColor('#1a1a2e');
+    this.add.text(400, 200, 'Game Over', { fontSize: '48px', fill: '#ff6b6b', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 300, 'You caught ' + data.score + ' stars!', { fontSize: '28px', fill: '#ffd700', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 400, 'Press SPACE to Play Again', { fontSize: '24px', fill: '#00ff88', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+  }
+}
+
+const config = {
+  type: Phaser.AUTO,
+  width: 800,
+  height: 600,
+  physics: {
+    default: 'arcade',
+    arcade: { gravity: { y: 0 }, debug: false }
+  },
+  scene: [TitleScene, GameScene, GameOverScene]
+};
+
+const game = new Phaser.Game(config);
+</script>
+</body>
+</html>

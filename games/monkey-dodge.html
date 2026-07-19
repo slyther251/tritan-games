@@ -1,0 +1,1631 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Monkey Dodge</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+// ── Persistent data ──────────────────────────────────────────────────────────
+const GameData = {
+  get bananas()      { return parseInt(localStorage.getItem('md_bananas') || '0'); },
+  set bananas(v)     { localStorage.setItem('md_bananas', Math.max(0, v)); },
+  get owned()        { return JSON.parse(localStorage.getItem('md_owned') || '[]'); },
+  own(id)            { const o = this.owned; if (!o.includes(id)) { o.push(id); localStorage.setItem('md_owned', JSON.stringify(o)); } },
+  isOwned(id)        { return this.owned.includes(id); },
+  get equippedHat()  { return localStorage.getItem('md_hat')   || 'none'; },
+  set equippedHat(v) { localStorage.setItem('md_hat', v); },
+  get equippedTrail(){ return localStorage.getItem('md_trail') || 'none'; },
+  set equippedTrail(v){ localStorage.setItem('md_trail', v); },
+};
+
+// ── Color picker ─────────────────────────────────────────────────────────────
+const COLORS = [
+  { name: 'Brown',  body: 0x7a5230, face: 0xc8a070 },
+  { name: 'Blue',   body: 0x2255cc, face: 0x88aaff },
+  { name: 'Purple', body: 0x772299, face: 0xcc88ff },
+  { name: 'Orange', body: 0xdd6600, face: 0xffaa44 },
+  { name: 'Pink',   body: 0xdd2277, face: 0xff99cc },
+  { name: 'Green',  body: 0x228844, face: 0x88ddaa },
+  { name: 'Yellow', body: 0xbb9900, face: 0xffee66 },
+];
+
+// ── Paintball colors ─────────────────────────────────────────────────────────
+const PAINT_COLORS = [0xff2222, 0x2266ff, 0xffee00, 0x22cc44, 0xcc22ff, 0xff8800, 0xff44cc];
+
+// ── Tree positions (shared) ───────────────────────────────────────────────────
+const TREE_SPOTS = [
+  {x:140,y:140},{x:660,y:140},{x:140,y:460},{x:660,y:460},
+  {x:400,y:90},{x:400,y:510},{x:90,y:300},{x:710,y:300},
+  {x:270,y:280},{x:530,y:320}
+];
+
+// ── Map configurations ────────────────────────────────────────────────────────
+const MAPS = [
+  { id: 'forest', name: 'Forest', bg: '#2d5a1b', gridColor: 0x1f4a11, gridAlpha: 0.5,  trunkColor: 0x6b3a2a, canopyColor: 0x1a7a0a, hasFronds: false, decorType: null   },
+  { id: 'beach',  name: 'Beach',  bg: '#d4a843', gridColor: 0xb88820, gridAlpha: 0.25, trunkColor: 0xa07830, canopyColor: 0x228833, hasFronds: true,  decorType: 'beach' },
+  { id: 'snow',   name: 'Snow',   bg: '#c8dff5', gridColor: 0x99bbdd, gridAlpha: 0.4,  trunkColor: 0x778899, canopyColor: 0xddeeff, hasFronds: false, decorType: 'snow'  },
+  { id: 'night',  name: 'Night',  bg: '#080820', gridColor: 0x1a1a4a, gridAlpha: 0.5,  trunkColor: 0x2a1a0a, canopyColor: 0x0a2a1a, hasFronds: false, decorType: 'night' },
+  { id: 'lava',   name: 'Lava',   bg: '#3a0a08', gridColor: 0x8a2008, gridAlpha: 0.5,  trunkColor: 0x5a2010, canopyColor: 0x8a3000, hasFronds: false, decorType: 'lava'  },
+];
+
+// ── Sandbox constants ────────────────────────────────────────────────────────
+const SANDBOX_BS = 40;   // block size in pixels
+const SB_PH = 30;        // player physics half-height
+const SB_PW = 14;        // player physics half-width
+const SANDBOX_BLOCKS = [
+  null,
+  { name: 'Grass',  color: 0x44aa22, top: 0x66dd33 },
+  { name: 'Dirt',   color: 0x7a4a28, top: null      },
+  { name: 'Stone',  color: 0x808080, top: null      },
+  { name: 'Wood',   color: 0x8b6914, top: 0x5a4010  },
+  { name: 'Sand',   color: 0xd4c47a, top: null      },
+  { name: 'Snow',   color: 0xe8f4ff, top: 0xffffff  },
+  { name: 'Lava',   color: 0xff4400, top: 0xff8800  },
+  { name: 'Glass',  color: 0x88ccff, top: null      },
+];
+
+// ── Shop catalogue ────────────────────────────────────────────────────────────
+const SHOP_ITEMS = [
+  // Hats
+  { id:'hat_crown',  type:'hat',   name:'Crown',      price:100, desc:'Royal gold crown'       },
+  { id:'hat_party',  type:'hat',   name:'Party Hat',  price:50,  desc:'For celebrations!'      },
+  { id:'hat_ninja',  type:'hat',   name:'Ninja Band', price:75,  desc:'Silent but fast'        },
+  { id:'hat_cowboy', type:'hat',   name:'Cowboy',     price:60,  desc:'Yeehaw!'                },
+  { id:'hat_tophat',     type:'hat', name:'Top Hat',    price:80,  desc:'Fancy!'                 },
+  { id:'hat_ghostface',  type:'hat', name:'Ghost Face', price:120, desc:'Who did that?!'         },
+  // Trails
+  { id:'trail_stars',  type:'trail', name:'Stars',   price:80,  desc:'Leave a trail of stars' },
+  { id:'trail_fire',   type:'trail', name:'Fire',    price:100, desc:'Blaze it!'              },
+  { id:'trail_rainbow',type:'trail', name:'Rainbow', price:150, desc:'All the colors!'        },
+  { id:'trail_ice',    type:'trail', name:'Ice',     price:90,  desc:'Chill vibes'            },
+];
+
+// ── Draw hat on a monkey container ───────────────────────────────────────────
+function addHat(scene, container, hatId) {
+  // Monkey head center is at local (0, -22); top of head ≈ y=-39
+  switch (hatId) {
+    case 'hat_crown':
+      container.add(scene.add.rectangle(0,  -41, 28,  5, 0xffdd00)); // band
+      container.add(scene.add.rectangle(-9, -47,  6, 12, 0xffdd00)); // left spike
+      container.add(scene.add.rectangle( 0, -50,  6, 18, 0xffdd00)); // center spike
+      container.add(scene.add.rectangle( 9, -47,  6, 12, 0xffdd00)); // right spike
+      break;
+    case 'hat_party':
+      container.add(scene.add.triangle(0, -52, -13, 14, 0, -14, 13, 14, 0xff44aa));
+      container.add(scene.add.triangle(0, -52, -13, 14, 0, -14, 13, 14, 0x44aaff).setAlpha(0.5));
+      container.add(scene.add.circle(0, -66, 5, 0xffffff));
+      break;
+    case 'hat_ninja':
+      container.add(scene.add.rectangle(0, -27, 36, 8, 0x111111));
+      container.add(scene.add.rectangle(0, -27, 36, 2, 0xffffff));
+      break;
+    case 'hat_cowboy':
+      container.add(scene.add.rectangle( 0, -39, 44,  5, 0x8b5e3c)); // brim
+      container.add(scene.add.rectangle( 0, -53, 22, 22, 0x8b5e3c)); // crown
+      container.add(scene.add.rectangle( 0, -43, 22,  4, 0x4a3020)); // band
+      break;
+    case 'hat_tophat':
+      container.add(scene.add.rectangle(0, -38, 36,  4, 0x111111)); // brim
+      container.add(scene.add.rectangle(0, -57, 24, 34, 0x111111)); // tall crown
+      container.add(scene.add.rectangle(0, -41, 24,  3, 0x555555)); // band
+      break;
+    case 'hat_ghostface':
+      // Black hood draped over head
+      container.add(scene.add.ellipse(0, -30, 44, 52, 0x111111));
+      // White ghost mask (elongated teardrop)
+      container.add(scene.add.ellipse(0, -24, 22, 32, 0xffffff));
+      container.add(scene.add.ellipse(0, -11, 13, 14, 0xffffff)); // chin droop
+      // Black eye holes
+      container.add(scene.add.ellipse(-6, -28,  8, 11, 0x000000));
+      container.add(scene.add.ellipse( 6, -28,  8, 11, 0x000000));
+      // Screaming mouth
+      container.add(scene.add.ellipse(0, -17,  8, 12, 0x000000));
+      break;
+  }
+}
+
+// ── Draw hat icon for shop card ───────────────────────────────────────────────
+function drawHatIcon(scene, x, y, hatId) {
+  const objs = [];
+  switch (hatId) {
+    case 'hat_crown':
+      objs.push(scene.add.rectangle(x, y+4, 36, 7, 0xffdd00));
+      objs.push(scene.add.rectangle(x-11, y-4, 8, 14, 0xffdd00));
+      objs.push(scene.add.rectangle(x,    y-8, 8, 22, 0xffdd00));
+      objs.push(scene.add.rectangle(x+11, y-4, 8, 14, 0xffdd00));
+      break;
+    case 'hat_party':
+      objs.push(scene.add.triangle(x, y-10, -18, 20, 0, -24, 18, 20, 0xff44aa));
+      objs.push(scene.add.circle(x, y-34, 7, 0xffffff));
+      break;
+    case 'hat_ninja':
+      objs.push(scene.add.rectangle(x, y, 44, 12, 0x111111));
+      objs.push(scene.add.rectangle(x, y, 44,  3, 0xffffff));
+      break;
+    case 'hat_cowboy':
+      objs.push(scene.add.rectangle(x, y+6, 54, 7, 0x8b5e3c));
+      objs.push(scene.add.rectangle(x, y-6, 30, 20, 0x8b5e3c));
+      objs.push(scene.add.rectangle(x, y+2, 30,  5, 0x4a3020));
+      break;
+    case 'hat_tophat':
+      objs.push(scene.add.rectangle(x, y+8, 46, 6, 0x111111));
+      objs.push(scene.add.rectangle(x, y-8, 30, 30, 0x111111));
+      objs.push(scene.add.rectangle(x, y+4, 30,  4, 0x555555));
+      break;
+    case 'hat_ghostface':
+      objs.push(scene.add.ellipse(x, y,    40, 50, 0x111111)); // hood
+      objs.push(scene.add.ellipse(x, y-2,  22, 34, 0xffffff)); // mask
+      objs.push(scene.add.ellipse(x, y+14, 13, 14, 0xffffff)); // chin
+      objs.push(scene.add.ellipse(x-7, y-6, 8, 12, 0x000000)); // left eye
+      objs.push(scene.add.ellipse(x+7, y-6, 8, 12, 0x000000)); // right eye
+      objs.push(scene.add.ellipse(x,   y+6, 8, 12, 0x000000)); // mouth
+      break;
+  }
+  return objs;
+}
+
+// ── Draw trail icon for shop card ─────────────────────────────────────────────
+function drawTrailIcon(scene, x, y, trailId) {
+  const objs = [];
+  switch (trailId) {
+    case 'trail_stars':
+      [-20, 0, 20].forEach((dx, i) => objs.push(scene.add.star(x+dx, y, 5, 5, 12, 0xffe066).setAlpha(1 - i*0.2)));
+      break;
+    case 'trail_fire':
+      [0xffaa00, 0xff6600, 0xff2200].forEach((c, i) => objs.push(scene.add.circle(x + i*16 - 16, y, 10 - i*2, c)));
+      break;
+    case 'trail_rainbow':
+      [0xff0000,0xff8800,0xffff00,0x00ff00,0x0088ff,0x8800ff].forEach((c,i) => objs.push(scene.add.circle(x-25+i*10, y, 7, c)));
+      break;
+    case 'trail_ice':
+      [-18,0,18].forEach((dx,i) => { const c = scene.add.circle(x+dx, y, 9-i*2, 0x88eeff); c.setAlpha(0.9-i*0.2); objs.push(c); });
+      break;
+  }
+  return objs;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+class MapSpinnerScene extends Phaser.Scene {
+  constructor() { super('MapSpinnerScene'); }
+
+  create(data) {
+    this.colorIndex = (data && data.colorIndex !== undefined) ? data.colorIndex : 0;
+
+    const W = 800, H = 600;
+    const cx = W / 2, cy = 300;
+    const radius = 190;
+    const sliceAngle = (Math.PI * 2) / MAPS.length;
+
+    this.cameras.main.setBackgroundColor('#0a0a22');
+
+    this.add.text(W/2, 44, 'PICKING YOUR MAP!', {
+      fontSize: '42px', fill: '#ffe066', fontFamily: 'Arial Black',
+      stroke: '#222', strokeThickness: 5
+    }).setOrigin(0.5);
+
+    // Wheel container
+    this.wheelContainer = this.add.container(cx, cy);
+
+    // Draw wheel slices
+    const wheelGfx = this.make.graphics({ x: 0, y: 0, add: false });
+    MAPS.forEach((map, i) => {
+      const start = i * sliceAngle - Math.PI / 2;
+      const end   = start + sliceAngle;
+      const col   = parseInt(map.bg.replace('#', ''), 16);
+      wheelGfx.fillStyle(col, 1);
+      wheelGfx.beginPath();
+      wheelGfx.moveTo(0, 0);
+      wheelGfx.arc(0, 0, radius, start, end, false);
+      wheelGfx.closePath();
+      wheelGfx.fillPath();
+      wheelGfx.lineStyle(3, 0xffffff, 0.6);
+      wheelGfx.beginPath();
+      wheelGfx.moveTo(0, 0);
+      wheelGfx.lineTo(Math.cos(start) * radius, Math.sin(start) * radius);
+      wheelGfx.strokePath();
+    });
+    wheelGfx.lineStyle(5, 0xffe066, 1);
+    wheelGfx.strokeCircle(0, 0, radius);
+    this.wheelContainer.add(wheelGfx);
+
+    // Map name labels (spin with wheel)
+    MAPS.forEach((map, i) => {
+      const mid = i * sliceAngle - Math.PI / 2 + sliceAngle / 2;
+      const lx  = Math.cos(mid) * radius * 0.66;
+      const ly  = Math.sin(mid) * radius * 0.66;
+      const lbl = this.add.text(lx, ly, map.name, {
+        fontSize: '18px', fill: '#ffffff', fontFamily: 'Arial Black',
+        stroke: '#000000', strokeThickness: 3
+      }).setOrigin(0.5);
+      this.wheelContainer.add(lbl);
+    });
+
+    // Center hub
+    const hub = this.make.graphics({ add: false });
+    hub.fillStyle(0x111133, 1); hub.fillCircle(0, 0, 22);
+    hub.fillStyle(0xffe066, 1); hub.fillCircle(0, 0, 16);
+    hub.fillStyle(0xffffff, 1); hub.fillCircle(0, 0, 8);
+    this.wheelContainer.add(hub);
+
+    // Fixed pointer at top
+    this.add.triangle(cx, cy - radius - 8, 0, -28, 14, 6, -14, 6, 0xff2222);
+    this.add.circle(cx, cy, radius + 8).setStrokeStyle(6, 0x333355);
+
+    // Pick winner & compute final rotation so that slice lands under pointer
+    const winnerIndex   = Phaser.Math.Between(0, MAPS.length - 1);
+    const finalRotation = -(winnerIndex + 0.5) * sliceAngle + 6 * Math.PI * 2;
+
+    this.resultText = this.add.text(W/2, cy + radius + 44, 'Spinning...', {
+      fontSize: '28px', fill: '#ffffff', fontFamily: 'Arial Black',
+      stroke: '#222', strokeThickness: 3
+    }).setOrigin(0.5);
+
+    this.promptText = this.add.text(W/2, H - 32, '', {
+      fontSize: '21px', fill: '#aaaaff', fontFamily: 'Arial'
+    }).setOrigin(0.5).setAlpha(0);
+
+    // Spin tween
+    this.tweens.add({
+      targets: this.wheelContainer,
+      rotation: finalRotation,
+      duration: 3800,
+      ease: 'Cubic.easeOut',
+      onComplete: () => {
+        const chosen = MAPS[winnerIndex];
+        this.resultText.setText(chosen.name.toUpperCase() + '!');
+        this.cameras.main.flash(280, 255, 220, 50, false);
+        this.cameras.main.shake(200, 0.008);
+        this.promptText.setText('Press SPACE to play on ' + chosen.name + '!');
+        this.tweens.add({
+          targets: this.promptText, alpha: 1, duration: 400,
+          onComplete: () => {
+            this.tweens.add({ targets: this.promptText, alpha: 0.25, duration: 600, yoyo: true, repeat: -1 });
+          }
+        });
+        this.input.keyboard.once('keydown-SPACE', () => {
+          this.scene.start('GameScene', { colorIndex: this.colorIndex, mapId: chosen.id });
+        });
+      }
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+  create() {
+    this.cameras.main.setBackgroundColor('#2d5a1b');
+    this.add.text(400, 120, 'MONKEY DODGE', { fontSize: '58px', fill: '#ffe066', fontFamily: 'Arial Black', stroke: '#333', strokeThickness: 6 }).setOrigin(0.5);
+    this.add.text(400, 220, "Don't get tagged!", { fontSize: '26px', fill: '#ffffff', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 270, 'WASD or Arrow Keys to move', { fontSize: '19px', fill: '#ccffcc', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 308, 'Collect knives — click to throw!', { fontSize: '19px', fill: '#ffdd88', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 346, 'Survive 60s to face the BOSS!', { fontSize: '19px', fill: '#ff8888', fontFamily: 'Arial' }).setOrigin(0.5);
+
+    // Banana balance
+    this.add.text(400, 398, 'Bananas: ' + GameData.bananas, { fontSize: '18px', fill: '#ffe066', fontFamily: 'Arial' }).setOrigin(0.5);
+
+    this.add.text(400, 450, 'Press SPACE to Play', { fontSize: '28px', fill: '#ffe066', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 488, 'Press P for Paintball Mode', { fontSize: '20px', fill: '#ff44cc', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 520, 'Press S for Shop', { fontSize: '20px', fill: '#aaaaff', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 552, 'Press B for Sandbox', { fontSize: '20px', fill: '#88ffaa', fontFamily: 'Arial' }).setOrigin(0.5);
+
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('ColorScene', { mode: 'classic' }));
+    this.input.keyboard.once('keydown-P',     () => this.scene.start('ColorScene', { mode: 'paintball' }));
+    this.input.keyboard.once('keydown-S',     () => this.scene.start('ShopScene'));
+    this.input.keyboard.once('keydown-B',     () => this.scene.start('SandboxScene'));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+class ColorScene extends Phaser.Scene {
+  constructor() { super('ColorScene'); }
+  create(data) {
+    this.mode = (data && data.mode) || 'classic';
+    this.cameras.main.setBackgroundColor('#1a1a2e');
+    this.selected = 0;
+    this.add.text(400, 70, 'Pick Your Monkey!', { fontSize: '40px', fill: '#ffe066', fontFamily: 'Arial Black', stroke: '#333', strokeThickness: 5 }).setOrigin(0.5);
+    this.preview = this.add.container(400, 230);
+    this.drawPreview();
+    this.nameText = this.add.text(400, 330, COLORS[0].name, { fontSize: '28px', fill: '#ffffff', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(180, 230, '<', { fontSize: '52px', fill: '#ffe066', fontFamily: 'Arial Black' }).setOrigin(0.5).setInteractive({ useHandCursor: true }).on('pointerdown', () => this.shift(-1));
+    this.add.text(620, 230, '>', { fontSize: '52px', fill: '#ffe066', fontFamily: 'Arial Black' }).setOrigin(0.5).setInteractive({ useHandCursor: true }).on('pointerdown', () => this.shift(1));
+    COLORS.forEach((c, i) => {
+      const sx = 400 + (i - 3) * 70;
+      this.add.circle(sx, 430, 22, c.body).setInteractive({ useHandCursor: true }).on('pointerdown', () => { this.selected = i; this.refresh(); });
+      this.add.circle(sx, 430, 22).setStrokeStyle(2, 0xffffff, 0.4);
+    });
+    this.ring = this.add.circle(400 + (0-3)*70, 430, 26).setStrokeStyle(3, 0xffe066);
+    const modeLabel = this.mode === 'paintball' ? 'PAINTBALL MODE' : 'CLASSIC MODE';
+    const modeColor = this.mode === 'paintball' ? '#ff44cc' : '#aaffaa';
+    this.add.text(400, 490, modeLabel, { fontSize: '18px', fill: modeColor, fontFamily: 'Arial Black' }).setOrigin(0.5);
+    this.add.text(400, 518, 'Press SPACE or click to play!', { fontSize: '20px', fill: '#ffe066', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.input.keyboard.once('keydown-SPACE', () => this.startGame());
+    this.cursors.left.on('down',  () => this.shift(-1));
+    this.cursors.right.on('down', () => this.shift(1));
+  }
+  shift(d) { this.selected = (this.selected + d + COLORS.length) % COLORS.length; this.refresh(); }
+  drawPreview() {
+    this.preview.removeAll(true);
+    const c = COLORS[this.selected]; const s = 2.2;
+    this.preview.add(this.add.ellipse(0, 4*s, 38*s, 42*s, c.body));
+    this.preview.add(this.add.circle(0, -22*s, 17*s, c.body));
+    this.preview.add(this.add.circle(0, -22*s, 11*s, c.face));
+    this.preview.add(this.add.circle(-5*s, -24*s, 3*s, 0x111111));
+    this.preview.add(this.add.circle( 5*s, -24*s, 3*s, 0x111111));
+    this.preview.add(this.add.ellipse(-22*s, 6*s, 12*s, 28*s, c.body));
+    this.preview.add(this.add.ellipse( 22*s, 6*s, 12*s, 28*s, c.body));
+    // Preview hat
+    addHat(this, this.preview, GameData.equippedHat);
+  }
+  refresh() { this.drawPreview(); this.nameText.setText(COLORS[this.selected].name); this.ring.setPosition(400+(this.selected-3)*70, 430); }
+  startGame() {
+    if (this.mode === 'paintball') {
+      this.scene.start('PaintballScene', { colorIndex: this.selected });
+    } else {
+      this.scene.start('MapSpinnerScene', { colorIndex: this.selected });
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+class ShopScene extends Phaser.Scene {
+  constructor() { super('ShopScene'); }
+
+  create() {
+    this.activeTab = 'hat';
+    this.cardObjs = [];
+
+    this.cameras.main.setBackgroundColor('#080818');
+
+    // Header bar
+    this.add.rectangle(400, 38, 800, 76, 0x111133);
+    this.add.text(400, 36, 'COSMETIC SHOP', { fontSize: '30px', fill: '#ffe066', fontFamily: 'Arial Black', stroke: '#222', strokeThickness: 4 }).setOrigin(0.5);
+
+    // Banana balance
+    this.bananaText = this.add.text(780, 36, 'Bananas: ' + GameData.bananas, { fontSize: '18px', fill: '#ffe066', fontFamily: 'Arial' }).setOrigin(1, 0.5);
+
+    // Back button
+    this.add.text(16, 36, '< Back', { fontSize: '18px', fill: '#aaaaff', fontFamily: 'Arial' })
+      .setOrigin(0, 0.5).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.scene.start('TitleScene'))
+      .on('pointerover', function() { this.setStyle({ fill: '#ffffff' }); })
+      .on('pointerout',  function() { this.setStyle({ fill: '#aaaaff' }); });
+
+    // Tabs
+    this.hatTabBtn   = this.makeTab(220, 88, 'HATS');
+    this.trailTabBtn = this.makeTab(580, 88, 'TRAILS');
+    this.tabUnderline = this.add.rectangle(220, 106, 130, 3, 0xffe066);
+
+    // Divider
+    this.add.rectangle(400, 113, 800, 1, 0x333355);
+
+    // Instructions
+    this.add.text(400, 570, 'Earn bananas by surviving — 1 banana per second!', { fontSize: '15px', fill: '#666688', fontFamily: 'Arial' }).setOrigin(0.5);
+
+    this.renderItems();
+
+    // Keys
+    this.input.keyboard.once('keydown-ESC', () => this.scene.start('TitleScene'));
+    this.input.keyboard.on('keydown-H', () => this.switchTab('hat'));
+    this.input.keyboard.on('keydown-T', () => this.switchTab('trail'));
+  }
+
+  makeTab(x, y, label) {
+    const txt = this.add.text(x, y, label, { fontSize: '20px', fill: '#aaaacc', fontFamily: 'Arial Black' })
+      .setOrigin(0.5).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.switchTab(label === 'HATS' ? 'hat' : 'trail'))
+      .on('pointerover', function() { this.setStyle({ fill: '#ffffff' }); })
+      .on('pointerout',  function() { this.setStyle({ fill: '#aaaacc' }); });
+    return txt;
+  }
+
+  switchTab(tab) {
+    this.activeTab = tab;
+    this.tabUnderline.setX(tab === 'hat' ? 220 : 580);
+    this.renderItems();
+  }
+
+  renderItems() {
+    this.cardObjs.forEach(o => { if (o && o.active) o.destroy(); });
+    this.cardObjs = [];
+
+    const items = SHOP_ITEMS.filter(i => i.type === this.activeTab);
+
+    if (this.activeTab === 'hat') {
+      // 3 per row
+      const rowXs = [130, 400, 670];
+      items.forEach((item, i) => {
+        const x = rowXs[i % 3];
+        const y = i < 3 ? 275 : 450;
+        this.drawCard(item, x, y);
+      });
+    } else {
+      // 2x2 grid
+      items.forEach((item, i) => {
+        const x = i % 2 === 0 ? 200 : 600;
+        const y = i < 2 ? 275 : 450;
+        this.drawCard(item, x, y);
+      });
+    }
+  }
+
+  drawCard(item, x, y) {
+    const owned   = GameData.isOwned(item.id);
+    const isHat   = item.type === 'hat';
+    const equipped = isHat ? GameData.equippedHat === item.id : GameData.equippedTrail === item.id;
+
+    const W = 155, H = 160;
+    let bgColor = 0x0d0d22, strokeColor = 0x333366, strokeW = 1;
+    if (equipped)  { bgColor = 0x0d220d; strokeColor = 0x33ff55; strokeW = 2; }
+    else if (owned){ bgColor = 0x0d0d22; strokeColor = 0x4444bb; strokeW = 2; }
+
+    const bg = this.add.rectangle(x, y, W, H, bgColor).setStrokeStyle(strokeW, strokeColor);
+    this.cardObjs.push(bg);
+
+    // Item icon
+    const iconObjs = isHat
+      ? drawHatIcon(this, x, y - 42, item.id)
+      : drawTrailIcon(this, x, y - 42, item.id);
+    this.cardObjs.push(...iconObjs);
+
+    // Name
+    const nameT = this.add.text(x, y + 24, item.name, { fontSize: '15px', fill: '#ffffff', fontFamily: 'Arial Bold' }).setOrigin(0.5);
+    this.cardObjs.push(nameT);
+
+    if (equipped) {
+      const eq = this.add.text(x, y + 52, '✓ EQUIPPED', { fontSize: '13px', fill: '#33ff55', fontFamily: 'Arial' }).setOrigin(0.5);
+      this.cardObjs.push(eq);
+    } else if (owned) {
+      const btn = this.add.text(x, y + 52, '[ EQUIP ]', { fontSize: '13px', fill: '#8888ff', fontFamily: 'Arial' })
+        .setOrigin(0.5).setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => {
+          if (isHat) GameData.equippedHat = item.id;
+          else       GameData.equippedTrail = item.id;
+          this.renderItems();
+        })
+        .on('pointerover', function() { this.setStyle({ fill: '#ffffff' }); })
+        .on('pointerout',  function() { this.setStyle({ fill: '#8888ff' }); });
+      this.cardObjs.push(btn);
+    } else {
+      const priceT = this.add.text(x, y + 44, item.price + ' bananas', { fontSize: '13px', fill: '#ffe066', fontFamily: 'Arial' }).setOrigin(0.5);
+      this.cardObjs.push(priceT);
+
+      const canAfford = GameData.bananas >= item.price;
+      const btnLabel  = canAfford ? '[ BUY ]' : 'Need more!';
+      const btnColor  = canAfford ? '#44ff88' : '#555555';
+      const btn = this.add.text(x, y + 63, btnLabel, { fontSize: '13px', fill: btnColor, fontFamily: 'Arial' }).setOrigin(0.5);
+      this.cardObjs.push(btn);
+      if (canAfford) {
+        btn.setInteractive({ useHandCursor: true })
+          .on('pointerdown', () => {
+            GameData.bananas -= item.price;
+            GameData.own(item.id);
+            if (isHat) GameData.equippedHat = item.id;
+            else       GameData.equippedTrail = item.id;
+            this.bananaText.setText('Bananas: ' + GameData.bananas);
+            this.renderItems();
+          })
+          .on('pointerover', function() { this.setStyle({ fill: '#ffffff' }); })
+          .on('pointerout',  function() { this.setStyle({ fill: '#44ff88' }); });
+      }
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+
+  create(data) {
+    const mapId        = (data && data.mapId) || 'forest';
+    this.mapConfig     = MAPS.find(m => m.id === mapId) || MAPS[0];
+    this.mapId         = this.mapConfig.id;
+    this.cameras.main.setBackgroundColor(this.mapConfig.bg);
+    this.survivalTime  = 0;
+    this.dead          = false;
+    this.colorIndex    = (data && data.colorIndex !== undefined) ? data.colorIndex : 0;
+    this.equippedHat   = GameData.equippedHat;
+    this.equippedTrail = GameData.equippedTrail;
+    this._trailTick    = 0;
+    this._trailColorIdx= 0;
+    const playerColor  = COLORS[this.colorIndex];
+
+    // Knife system
+    this.knivesHeld       = 0;
+    this.knifePickupGroup = this.add.group();
+    this.thrownKnifeGroup = this.add.group();
+
+    // Boss system
+    this.boss        = null;
+    this.bossHP      = 10;
+    this.bossMaxHP   = 10;
+    this.bossSpawned = false;
+    this.bossActive  = false;
+
+    this.buildMap();
+
+    // Player
+    this.player = this.createMonkey(400, 300, playerColor.body, playerColor.face, this.equippedHat);
+    this.physics.add.existing(this.player);
+    this.player.body.setCollideWorldBounds(true);
+    this.player.body.setCircle(18, -18, -22);
+    this.physics.add.collider(this.player, this.trees);
+
+    // Taggers
+    this.taggers = [];
+    this.spawnTagger();
+
+    // HUD
+    this.scoreText = this.add.text(16, 16, 'Survived: 0s', { fontSize: '22px', fill: '#ffe066', fontFamily: 'Arial', stroke: '#222', strokeThickness: 3 });
+    this.knifeText = this.add.text(16, 46, 'Knives: 0  (T to throw)', { fontSize: '17px', fill: '#dddddd', fontFamily: 'Arial', stroke: '#222', strokeThickness: 2 });
+    this.warnText  = this.add.text(400, 20, '', { fontSize: '22px', fill: '#ff4444', fontFamily: 'Arial', stroke: '#111', strokeThickness: 3 }).setOrigin(0.5);
+
+    // Boss bar (hidden)
+    this.bossBarG = this.add.graphics().setVisible(false);
+    this.bossLabel = this.add.text(400, 556, 'BOSS', { fontSize: '17px', fill: '#ff3333', fontFamily: 'Arial Black', stroke: '#111', strokeThickness: 3 }).setOrigin(0.5).setVisible(false);
+
+    // Timers
+    this.time.addEvent({
+      delay: 1000, loop: true,
+      callback: () => {
+        if (this.dead) return;
+        this.survivalTime++;
+        this.scoreText.setText('Survived: ' + this.survivalTime + 's');
+        if (this.survivalTime === 55) { this.warnText.setStyle({ fontSize:'22px', fill:'#ff4444', fontFamily:'Arial', stroke:'#111', strokeThickness:3 }); this.warnText.setText('BOSS incoming in 5 seconds!'); }
+        if (this.survivalTime === 60 && !this.bossSpawned) { this.bossSpawned = true; this.warnText.setText(''); this.spawnBoss(); }
+      }
+    });
+    this.time.addEvent({
+      delay: 15000, loop: true,
+      callback: () => {
+        if (!this.dead) { this.spawnTagger(); this.warn('Another monkey joined!', '#ff4444'); }
+      }
+    });
+    this.spawnKnifePickup();
+    this.time.addEvent({ delay: 7000, loop: true, callback: this.spawnKnifePickup, callbackScope: this });
+
+    // Speed coils
+    this.coilGroup   = this.add.group();
+    this.boosted     = false;
+    this.boostTimer  = null;
+    this.boostAura   = this.add.circle(0, 0, 30, 0x00ffff, 0.35).setVisible(false);
+    this.boostText   = this.add.text(400, 76, '', { fontSize: '16px', fill: '#00ffff', fontFamily: 'Arial Black', stroke: '#111', strokeThickness: 2 }).setOrigin(0.5);
+    this.spawnCoil();
+    this.time.addEvent({ delay: 10000, loop: true, callback: this.spawnCoil, callbackScope: this });
+
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.wasd    = this.input.keyboard.addKeys({ up:'W', down:'S', left:'A', right:'D' });
+    this.input.keyboard.on('keydown-T', () => this.throwKnife(this.input.activePointer));
+  }
+
+  warn(msg, color) {
+    this.warnText.setStyle({ fontSize:'22px', fill: color||'#ff4444', fontFamily:'Arial', stroke:'#111', strokeThickness:3 });
+    this.warnText.setText(msg);
+    this.time.delayedCall(2500, () => { if (!this.dead) this.warnText.setText(''); });
+  }
+
+  buildMap() {
+    const map = this.mapConfig;
+    const g = this.add.graphics();
+    g.lineStyle(1, map.gridColor, map.gridAlpha);
+    for (let x = 0; x <= 800; x += 50) g.lineBetween(x, 0, x, 600);
+    for (let y = 0; y <= 600; y += 50) g.lineBetween(0, y, 800, y);
+    this.addMapDecorations(map.decorType);
+    this.trees = this.physics.add.staticGroup();
+    TREE_SPOTS.forEach(p => {
+      const tx = map.hasFronds ? p.x + 3 : p.x;
+      const tw = map.hasFronds ? 8 : 10;
+      const th = map.hasFronds ? 32 : 22;
+      this.add.rectangle(tx, p.y + 20, tw, th, map.trunkColor);
+      const canopy = this.add.circle(p.x, p.y, 30, map.canopyColor);
+      this.physics.add.existing(canopy, true);
+      canopy.body.setCircle(30);
+      this.trees.add(canopy);
+      if (map.hasFronds) {
+        this.add.ellipse(p.x - 18, p.y - 6, 34, 10, 0x33aa44).setRotation(-0.65);
+        this.add.ellipse(p.x + 18, p.y - 6, 34, 10, 0x33aa44).setRotation(0.65);
+        this.add.ellipse(p.x, p.y - 18, 30, 10, 0x33aa44).setRotation(-0.1);
+      }
+    });
+  }
+
+  addMapDecorations(type) {
+    if (type === 'beach') {
+      for (let i = 0; i < 6; i++)
+        this.add.star(Phaser.Math.Between(40, 760), Phaser.Math.Between(40, 560), 5, 5, 11, 0xff8866);
+      for (let i = 0; i < 10; i++)
+        this.add.circle(Phaser.Math.Between(40, 760), Phaser.Math.Between(40, 560), Phaser.Math.Between(3, 6), 0xffe0c8);
+    } else if (type === 'snow') {
+      for (let i = 0; i < 22; i++)
+        this.add.star(Phaser.Math.Between(20, 780), Phaser.Math.Between(20, 580), 6, 3, 8, 0xddeeff).setAlpha(0.65);
+    } else if (type === 'night') {
+      this.add.circle(680, 80, 44, 0xffff88, 0.2);
+      this.add.circle(680, 80, 30, 0xffffcc);
+      for (let i = 0; i < 35; i++)
+        this.add.star(Phaser.Math.Between(20, 780), Phaser.Math.Between(20, 580), 4, 2, 5, 0xffffcc).setAlpha(Phaser.Math.FloatBetween(0.3, 1));
+    } else if (type === 'lava') {
+      for (let i = 0; i < 14; i++) {
+        const x = Phaser.Math.Between(30, 770), y = Phaser.Math.Between(30, 570);
+        const r = Phaser.Math.Between(8, 24);
+        this.add.circle(x, y, r, 0x881500, 0.9);
+        this.add.circle(x, y, Math.floor(r * 0.5), 0xff5500, 0.7);
+      }
+    }
+  }
+
+  createMonkey(x, y, bodyColor, faceColor, hatId) {
+    const c = this.add.container(x, y);
+    c.add(this.add.ellipse(0, 4, 38, 42, bodyColor));
+    c.add(this.add.circle(0, -22, 17, bodyColor));
+    c.add(this.add.circle(0, -22, 11, faceColor));
+    c.add(this.add.circle(-5, -24, 3, 0x111111));
+    c.add(this.add.circle( 5, -24, 3, 0x111111));
+    c.add(this.add.ellipse(-22, 6, 12, 28, bodyColor));
+    c.add(this.add.ellipse( 22, 6, 12, 28, bodyColor));
+    addHat(this, c, hatId || 'none');
+    return c;
+  }
+
+  createBossMonkey(x, y) {
+    const c = this.add.container(x, y);
+    const s = 2.2;
+    c.add(this.add.ellipse(0, 4*s, 38*s, 42*s, 0xaa0000));
+    c.add(this.add.circle(0, -22*s, 17*s, 0xaa0000));
+    c.add(this.add.circle(0, -22*s, 11*s, 0xff5555));
+    c.add(this.add.circle(-5*s, -24*s, 3*s, 0xffff00));
+    c.add(this.add.circle( 5*s, -24*s, 3*s, 0xffff00));
+    c.add(this.add.ellipse(-22*s, 6*s, 12*s, 28*s, 0xaa0000));
+    c.add(this.add.ellipse( 22*s, 6*s, 12*s, 28*s, 0xaa0000));
+    c.add(this.add.triangle(0, -80, -22, -60, 0, -80, 22, -60, 0xffdd00));
+    return c;
+  }
+
+  spawnTagger() {
+    const edges = [
+      {x:Phaser.Math.Between(30,770), y:30},
+      {x:Phaser.Math.Between(30,770), y:570},
+      {x:30,  y:Phaser.Math.Between(30,570)},
+      {x:770, y:Phaser.Math.Between(30,570)}
+    ];
+    const pos = Phaser.Utils.Array.GetRandom(edges);
+    const t = this.createMonkey(pos.x, pos.y, 0xcc1111, 0xff7777, 'none');
+    this.physics.add.existing(t);
+    t.body.setCollideWorldBounds(true);
+    t.body.setCircle(18, -18, -22);
+    this.physics.add.collider(t, this.trees);
+    this.taggers.push(t);
+  }
+
+  spawnBoss() {
+    const bx = this.player.x < 400 ? 720 : 80;
+    const by = this.player.y < 300 ? 520 : 80;
+    this.boss = this.createBossMonkey(bx, by);
+    this.physics.add.existing(this.boss);
+    this.boss.body.setCollideWorldBounds(true);
+    this.boss.body.setCircle(40, -40, -50);
+    this.physics.add.collider(this.boss, this.trees);
+    this.bossActive = true;
+    this.bossHP = this.bossMaxHP;
+    this.bossBarG.setVisible(true);
+    this.bossLabel.setVisible(true);
+    this.drawBossBar();
+    this.cameras.main.shake(400, 0.015);
+    this.warnText.setStyle({ fontSize:'26px', fill:'#ff2222', fontFamily:'Arial Black', stroke:'#111', strokeThickness:4 });
+    this.warnText.setText('THE BOSS IS HERE!');
+    this.time.delayedCall(3000, () => { if (!this.dead) this.warnText.setText(''); });
+  }
+
+  spawnKnifePickup() {
+    if (this.dead || this.knifePickupGroup.getLength() >= 4) return;
+    let x, y, safe, att = 0;
+    do {
+      x = Phaser.Math.Between(60, 740);
+      y = Phaser.Math.Between(60, 540);
+      safe = Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y) > 80;
+      if (safe) TREE_SPOTS.forEach(t => { if (Phaser.Math.Distance.Between(x, y, t.x, t.y) < 50) safe = false; });
+    } while (!safe && ++att < 30);
+
+    const angle = Math.PI / 4;
+    const blade  = this.add.rectangle(x, y, 26, 5, 0xdddddd).setRotation(angle);
+    const handle = this.add.rectangle(x - 9*Math.cos(angle), y - 9*Math.sin(angle), 10, 7, 0x886633).setRotation(angle);
+    const glint  = this.add.circle(x + 6*Math.cos(angle), y + 6*Math.sin(angle), 2, 0xffffff);
+    blade._ref   = { handle, glint };
+    this.knifePickupGroup.add(blade);
+    this.tweens.add({ targets: glint, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
+  }
+
+  spawnCoil() {
+    if (this.dead || this.coilGroup.getLength() >= 2) return;
+    let x, y, safe, att = 0;
+    do {
+      x = Phaser.Math.Between(60, 740);
+      y = Phaser.Math.Between(60, 540);
+      safe = Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y) > 100;
+      if (safe) TREE_SPOTS.forEach(t => { if (Phaser.Math.Distance.Between(x, y, t.x, t.y) < 55) safe = false; });
+    } while (!safe && ++att < 30);
+
+    // Draw coil as stacked rings
+    const rings = [];
+    const ringColors = [0x00ffff, 0x00ddee, 0x00bbcc];
+    for (let i = 0; i < 4; i++) {
+      const ring = this.add.ellipse(x, y - i*5 + 8, 22, 9, ringColors[i % 3]);
+      rings.push(ring);
+    }
+    // Glowing center dot
+    const glow = this.add.circle(x, y, 5, 0xffffff, 0.9);
+    this.tweens.add({ targets: [...rings, glow], alpha: { from:0.6, to:1 }, duration: 500, yoyo: true, repeat: -1 });
+
+    // Use the bottom ring as the anchor for collection detection
+    const anchor = rings[0];
+    anchor._coilParts = [...rings, glow];
+    this.coilGroup.add(anchor);
+  }
+
+  throwKnife() {
+    if (this.knivesHeld <= 0 || this.dead) return;
+
+    // Only target the boss
+    if (!this.bossActive || !this.boss) return;
+    const target = this.boss;
+
+    this.knivesHeld--;
+    this.knifeText.setText('Knives: ' + this.knivesHeld + '  (T to throw)');
+    const dx = target.x - this.player.x;
+    const dy = target.y - this.player.y;
+    const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+    const blade = this.add.rectangle(this.player.x, this.player.y, 22, 5, 0xeeeeee).setRotation(Math.atan2(dy, dx));
+    blade._vx = (dx/dist) * 620;
+    blade._vy = (dy/dist) * 620;
+    this.thrownKnifeGroup.add(blade);
+  }
+
+  drawBossBar() {
+    this.bossBarG.clear();
+    this.bossBarG.fillStyle(0x111111); this.bossBarG.fillRect(248, 565, 304, 28);
+    this.bossBarG.fillStyle(0x440000); this.bossBarG.fillRect(250, 567, 300, 24);
+    const pct   = Math.max(0, this.bossHP / this.bossMaxHP);
+    const color = pct > 0.5 ? 0xff2222 : pct > 0.25 ? 0xff8800 : 0xffff00;
+    this.bossBarG.fillStyle(color);
+    this.bossBarG.fillRect(250, 567, Math.floor(300*pct), 24);
+  }
+
+  spawnTrailParticle() {
+    const trail = this.equippedTrail;
+    if (trail === 'none') return;
+    let obj;
+    switch (trail) {
+      case 'trail_stars':
+        obj = this.add.star(this.player.x, this.player.y, 5, 3, 7, 0xffe066);
+        break;
+      case 'trail_fire':
+        obj = this.add.circle(this.player.x, this.player.y, Phaser.Math.Between(4,9),
+          Phaser.Utils.Array.GetRandom([0xff6600, 0xff3300, 0xffaa00]));
+        break;
+      case 'trail_rainbow': {
+        const cols = [0xff0000,0xff8800,0xffff00,0x00ff00,0x0088ff,0x8800ff];
+        obj = this.add.circle(this.player.x, this.player.y, 6, cols[this._trailColorIdx % cols.length]);
+        this._trailColorIdx++;
+        break;
+      }
+      case 'trail_ice':
+        obj = this.add.circle(this.player.x, this.player.y, Phaser.Math.Between(4,8), 0x88eeff);
+        break;
+    }
+    if (obj) this.tweens.add({ targets: obj, alpha: 0, scale: 0.1, duration: 380, onComplete: () => obj.destroy() });
+  }
+
+  update(time, delta) {
+    if (this.dead) return;
+
+    // Player movement
+    const spd = this.boosted ? 420 : 240;
+    let vx = 0, vy = 0;
+    if (this.cursors.left.isDown  || this.wasd.left.isDown)  vx = -spd;
+    if (this.cursors.right.isDown || this.wasd.right.isDown) vx =  spd;
+    if (this.cursors.up.isDown    || this.wasd.up.isDown)    vy = -spd;
+    if (this.cursors.down.isDown  || this.wasd.down.isDown)  vy =  spd;
+    this.player.body.setVelocity(vx, vy);
+
+    // Trail
+    this._trailTick += delta;
+    if (this._trailTick > 55 && (vx !== 0 || vy !== 0)) { this._trailTick = 0; this.spawnTrailParticle(); }
+
+    // Boost aura follows player
+    if (this.boosted) {
+      this.boostAura.setPosition(this.player.x, this.player.y).setVisible(true);
+    } else {
+      this.boostAura.setVisible(false);
+    }
+
+    // Collect speed coils
+    this.coilGroup.getChildren().slice().forEach(anchor => {
+      if (Phaser.Math.Distance.Between(this.player.x, this.player.y, anchor.x, anchor.y) < 28) {
+        anchor._coilParts.forEach(p => p.destroy());
+        anchor.destroy();
+        // Activate boost
+        this.boosted = true;
+        this.cameras.main.flash(120, 0, 255, 255, false);
+        if (this.boostTimer) this.boostTimer.remove();
+        let remaining = 4;
+        this.boostText.setText('SPEED BOOST  ' + remaining + 's');
+        const countdown = this.time.addEvent({
+          delay: 1000, repeat: 3,
+          callback: () => {
+            remaining--;
+            if (remaining > 0) this.boostText.setText('SPEED BOOST  ' + remaining + 's');
+            else { this.boosted = false; this.boostText.setText(''); }
+          }
+        });
+        this.boostTimer = countdown;
+      }
+    });
+
+    // Collect knives
+    this.knifePickupGroup.getChildren().slice().forEach(blade => {
+      if (Phaser.Math.Distance.Between(this.player.x, this.player.y, blade.x, blade.y) < 30) {
+        if (blade._ref) { blade._ref.handle.destroy(); blade._ref.glint.destroy(); }
+        blade.destroy();
+        this.knivesHeld++;
+        this.knifeText.setText('Knives: ' + this.knivesHeld + '  (click to throw)');
+      }
+    });
+
+    // Move thrown knives & hit boss
+    this.thrownKnifeGroup.getChildren().slice().forEach(knife => {
+      knife.x += knife._vx * (delta/1000);
+      knife.y += knife._vy * (delta/1000);
+      if (knife.x < -40 || knife.x > 840 || knife.y < -40 || knife.y > 640) { knife.destroy(); return; }
+      if (this.bossActive && this.boss && Phaser.Math.Distance.Between(knife.x, knife.y, this.boss.x, this.boss.y) < 48) {
+        knife.destroy();
+        this.bossHP--;
+        this.drawBossBar();
+        this.cameras.main.flash(80, 255, 200, 50, false);
+        if (this.bossHP <= 0) this.defeatBoss();
+      }
+    });
+
+    // Tagger AI
+    const mult = 1 + this.survivalTime * 0.012;
+    this.taggers.forEach(t => {
+      const dx = this.player.x - t.x, dy = this.player.y - t.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist > 5) t.body.setVelocity((dx/dist)*Math.min(150*mult,290), (dy/dist)*Math.min(150*mult,290));
+      if (dist < 28) this.triggerDeath();
+    });
+
+    // Boss AI
+    if (this.bossActive && this.boss) {
+      const dx = this.player.x - this.boss.x, dy = this.player.y - this.boss.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      const bSpd = Math.min(110 + this.survivalTime * 0.5, 200);
+      if (dist > 10) this.boss.body.setVelocity((dx/dist)*bSpd, (dy/dist)*bSpd);
+      if (dist < 52) this.triggerDeath();
+    }
+  }
+
+  triggerDeath() {
+    if (this.dead) return;
+    this.dead = true;
+    const earned = this.survivalTime;
+    GameData.bananas += earned;
+    this.cameras.main.shake(300, 0.02);
+    this.time.delayedCall(500, () => {
+      this.scene.start('GameOverScene', { score: this.survivalTime, earned, colorIndex: this.colorIndex, mapId: this.mapId });
+    });
+  }
+
+  defeatBoss() {
+    if (!this.bossActive) return;
+    this.bossActive = false;
+    this.boss.destroy(); this.boss = null;
+    this.bossBarG.setVisible(false);
+    this.bossLabel.setVisible(false);
+    const earned = this.survivalTime + 30;
+    GameData.bananas += earned;
+    this.cameras.main.shake(500, 0.025);
+    this.cameras.main.flash(300, 255, 220, 50, false);
+    this.warnText.setStyle({ fontSize:'30px', fill:'#ffe066', fontFamily:'Arial Black', stroke:'#333', strokeThickness:5 });
+    this.warnText.setText('BOSS DEFEATED!');
+    this.time.delayedCall(2500, () => {
+      this.dead = true;
+      this.scene.start('VictoryScene', { score: this.survivalTime, earned, colorIndex: this.colorIndex, mapId: this.mapId });
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  create(data) {
+    this.cameras.main.setBackgroundColor('#1a0a0a');
+    this.add.text(400, 110, 'YOU GOT TAGGED!', { fontSize: '48px', fill: '#ff4444', fontFamily: 'Arial Black' }).setOrigin(0.5);
+    this.add.text(400, 205, 'You survived for', { fontSize: '24px', fill: '#ffffff', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 268, data.score + ' seconds', { fontSize: '52px', fill: '#ffe066', fontFamily: 'Arial Black' }).setOrigin(0.5);
+    this.add.text(400, 340, '+ ' + data.earned + ' bananas earned!', { fontSize: '22px', fill: '#ffe066', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 374, 'Total: ' + GameData.bananas + ' bananas', { fontSize: '18px', fill: '#aaaaaa', fontFamily: 'Arial' }).setOrigin(0.5);
+
+    let msg = 'Survive to 60s to fight the BOSS!';
+    if (data.score >= 60) msg = 'So close! Throw more knives next time!';
+    else if (data.score >= 30) msg = 'Nice! Keep going to reach 60s!';
+    else if (data.score >= 15) msg = 'Use the trees to dodge!';
+    this.add.text(400, 415, msg, { fontSize: '18px', fill: '#aaffaa', fontFamily: 'Arial', wordWrap: { width: 560 } }).setOrigin(0.5);
+
+    this.add.text(400, 462, 'SPACE = Play Again    S = Shop    C = Change Color', { fontSize: '18px', fill: '#aaaaff', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene',  { colorIndex: data.colorIndex, mapId: data.mapId }));
+    this.input.keyboard.once('keydown-S',     () => this.scene.start('ShopScene'));
+    this.input.keyboard.once('keydown-C',     () => this.scene.start('ColorScene'));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+class VictoryScene extends Phaser.Scene {
+  constructor() { super('VictoryScene'); }
+  create(data) {
+    this.cameras.main.setBackgroundColor('#0a1a05');
+    this.add.text(400, 90,  'YOU WIN!',               { fontSize: '64px', fill: '#ffe066', fontFamily: 'Arial Black', stroke: '#333', strokeThickness: 6 }).setOrigin(0.5);
+    this.add.text(400, 175, 'You beat the boss!',      { fontSize: '26px', fill: '#aaffaa', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 240, 'Total time: ' + data.score + 's', { fontSize: '30px', fill: '#ffffff', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 295, '+ ' + data.earned + ' bananas earned! (30 bonus!)', { fontSize: '22px', fill: '#ffe066', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 330, 'Total: ' + GameData.bananas + ' bananas', { fontSize: '18px', fill: '#aaaaaa', fontFamily: 'Arial' }).setOrigin(0.5);
+
+    for (let i = 0; i < 22; i++) {
+      const star = this.add.star(Phaser.Math.Between(40,760), Phaser.Math.Between(370,560), 5, 4, 10,
+        Phaser.Utils.Array.GetRandom([0xffe066,0xff88cc,0x88ddff,0xaaffaa,0xff8844]));
+      this.tweens.add({ targets: star, y: star.y - Phaser.Math.Between(20,70), alpha: 0, duration: Phaser.Math.Between(1000,2500), repeat: -1, delay: Phaser.Math.Between(0,2000) });
+    }
+
+    this.add.text(400, 460, 'SPACE = Play Again    S = Shop    C = Change Color', { fontSize: '18px', fill: '#aaaaff', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene',  { colorIndex: data.colorIndex, mapId: data.mapId }));
+    this.input.keyboard.once('keydown-S',     () => this.scene.start('ShopScene'));
+    this.input.keyboard.once('keydown-C',     () => this.scene.start('ColorScene'));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+class PaintballScene extends Phaser.Scene {
+  constructor() { super('PaintballScene'); }
+
+  create(data) {
+    this.cameras.main.setBackgroundColor('#d4a843');
+    this.colorIndex    = (data && data.colorIndex !== undefined) ? data.colorIndex : 0;
+    this.dead          = false;
+    this.lives         = 3;
+    this.score         = 0;
+    this.survivalTime  = 0;
+    this.invincible    = false;
+    this.paintballs    = [];
+    this.lastShot      = 0;
+    this.shotCooldown  = 180;
+    this.paintColorIdx = 0;
+    this.taggerHP      = new Map();
+    this.bossHP        = 15;
+    this.bossMaxHP     = 15;
+    this.bossSpawned   = false;
+    this.bossActive    = false;
+    this.boss          = null;
+    this.equippedTrail = GameData.equippedTrail;
+    this._trailTick    = 0;
+    this._trailColorIdx= 0;
+    const playerColor  = COLORS[this.colorIndex];
+
+    // Sand grid
+    const g = this.add.graphics();
+    g.lineStyle(1, 0xb88820, 0.25);
+    for (let x = 0; x <= 800; x += 50) g.lineBetween(x, 0, x, 600);
+    for (let y = 0; y <= 600; y += 50) g.lineBetween(0, y, 800, y);
+
+    // Beach decorations
+    for (let i = 0; i < 6; i++) {
+      this.add.star(Phaser.Math.Between(40, 760), Phaser.Math.Between(40, 560), 5, 5, 11, 0xff8866);
+    }
+    for (let i = 0; i < 10; i++) {
+      this.add.circle(Phaser.Math.Between(40, 760), Phaser.Math.Between(40, 560), Phaser.Math.Between(3, 6), 0xffe0c8);
+    }
+
+    // Palm trees
+    this.trees = this.physics.add.staticGroup();
+    TREE_SPOTS.forEach(p => {
+      this.add.rectangle(p.x + 3, p.y + 22, 8, 32, 0xa07830);
+      const canopy = this.add.circle(p.x, p.y, 30, 0x228833);
+      this.physics.add.existing(canopy, true);
+      canopy.body.setCircle(30);
+      this.trees.add(canopy);
+      // Fronds
+      this.add.ellipse(p.x - 18, p.y - 6, 34, 10, 0x33aa44).setRotation(-0.65);
+      this.add.ellipse(p.x + 18, p.y - 6, 34, 10, 0x33aa44).setRotation(0.65);
+      this.add.ellipse(p.x, p.y - 18, 30, 10, 0x33aa44).setRotation(-0.1);
+    });
+
+    // Player
+    this.player = this.createMonkey(400, 300, playerColor.body, playerColor.face, GameData.equippedHat);
+    this.physics.add.existing(this.player);
+    this.player.body.setCollideWorldBounds(true);
+    this.player.body.setCircle(18, -18, -22);
+    this.physics.add.collider(this.player, this.trees);
+
+    // HUD
+    this.scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '22px', fill: '#ff44cc', fontFamily: 'Arial', stroke: '#222', strokeThickness: 3 });
+    this.timeText  = this.add.text(16, 46, 'Time: 0s', { fontSize: '17px', fill: '#cccccc', fontFamily: 'Arial', stroke: '#222', strokeThickness: 2 });
+    this.warnText  = this.add.text(400, 20, '', { fontSize: '22px', fill: '#ff4444', fontFamily: 'Arial', stroke: '#111', strokeThickness: 3 }).setOrigin(0.5);
+    this.add.text(784, 16, 'PAINTBALL', { fontSize: '15px', fill: '#ff44cc', fontFamily: 'Arial Black', stroke: '#111', strokeThickness: 2 }).setOrigin(1, 0);
+    this.add.text(784, 34, 'Click to shoot!', { fontSize: '13px', fill: '#ccaacc', fontFamily: 'Arial' }).setOrigin(1, 0);
+
+    // Hearts
+    this.heartTexts = [];
+    this.drawHearts();
+
+    // Boss bar (hidden)
+    this.bossBarG  = this.add.graphics().setVisible(false);
+    this.bossLabel = this.add.text(400, 556, 'BOSS', { fontSize: '17px', fill: '#ff3333', fontFamily: 'Arial Black', stroke: '#111', strokeThickness: 3 }).setOrigin(0.5).setVisible(false);
+
+    // Start with 2 taggers
+    this.taggers = [];
+    this.spawnTagger();
+    this.spawnTagger();
+
+    // Timers
+    this.time.addEvent({
+      delay: 1000, loop: true,
+      callback: () => {
+        if (this.dead) return;
+        this.survivalTime++;
+        this.timeText.setText('Time: ' + this.survivalTime + 's');
+        if (this.survivalTime === 55) this.warn('BOSS incoming in 5 seconds!', '#ff4444');
+        if (this.survivalTime === 60 && !this.bossSpawned) { this.bossSpawned = true; this.spawnBoss(); }
+      }
+    });
+    this.time.addEvent({
+      delay: 10000, loop: true,
+      callback: () => { if (!this.dead) this.spawnTagger(); }
+    });
+
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.wasd    = this.input.keyboard.addKeys({ up:'W', down:'S', left:'A', right:'D' });
+    this.input.on('pointerdown', this.shoot, this);
+  }
+
+  drawHearts() {
+    this.heartTexts.forEach(h => h.destroy());
+    this.heartTexts = [];
+    for (let i = 0; i < 3; i++) {
+      const h = this.add.text(784 - i*30, 55, '♥', {
+        fontSize: '22px', fill: i < this.lives ? '#ff2244' : '#333333', fontFamily: 'Arial', stroke: '#111', strokeThickness: 2
+      }).setOrigin(1, 0);
+      this.heartTexts.push(h);
+    }
+  }
+
+  warn(msg, color) {
+    this.warnText.setStyle({ fontSize:'22px', fill:color||'#ff4444', fontFamily:'Arial', stroke:'#111', strokeThickness:3 });
+    this.warnText.setText(msg);
+    this.time.delayedCall(2500, () => { if (!this.dead) this.warnText.setText(''); });
+  }
+
+  createMonkey(x, y, bodyColor, faceColor, hatId) {
+    const c = this.add.container(x, y);
+    c.add(this.add.ellipse(0, 4, 38, 42, bodyColor));
+    c.add(this.add.circle(0, -22, 17, bodyColor));
+    c.add(this.add.circle(0, -22, 11, faceColor));
+    c.add(this.add.circle(-5, -24, 3, 0x111111));
+    c.add(this.add.circle( 5, -24, 3, 0x111111));
+    c.add(this.add.ellipse(-22, 6, 12, 28, bodyColor));
+    c.add(this.add.ellipse( 22, 6, 12, 28, bodyColor));
+    addHat(this, c, hatId || 'none');
+    return c;
+  }
+
+  createBossMonkey(x, y) {
+    const c = this.add.container(x, y);
+    const s = 2.2;
+    c.add(this.add.ellipse(0, 4*s, 38*s, 42*s, 0xaa0000));
+    c.add(this.add.circle(0, -22*s, 17*s, 0xaa0000));
+    c.add(this.add.circle(0, -22*s, 11*s, 0xff5555));
+    c.add(this.add.circle(-5*s, -24*s, 3*s, 0xffff00));
+    c.add(this.add.circle( 5*s, -24*s, 3*s, 0xffff00));
+    c.add(this.add.ellipse(-22*s, 6*s, 12*s, 28*s, 0xaa0000));
+    c.add(this.add.ellipse( 22*s, 6*s, 12*s, 28*s, 0xaa0000));
+    c.add(this.add.triangle(0, -80, -22, -60, 0, -80, 22, -60, 0xffdd00));
+    return c;
+  }
+
+  spawnTagger() {
+    const edges = [
+      {x:Phaser.Math.Between(30,770), y:30},
+      {x:Phaser.Math.Between(30,770), y:570},
+      {x:30,  y:Phaser.Math.Between(30,570)},
+      {x:770, y:Phaser.Math.Between(30,570)}
+    ];
+    const pos = Phaser.Utils.Array.GetRandom(edges);
+    const t = this.createMonkey(pos.x, pos.y, 0xcc1111, 0xff7777, 'none');
+    this.physics.add.existing(t);
+    t.body.setCollideWorldBounds(true);
+    t.body.setCircle(18, -18, -22);
+    this.physics.add.collider(t, this.trees);
+    this.taggerHP.set(t, 3);
+    this.taggers.push(t);
+  }
+
+  spawnBoss() {
+    const bx = this.player.x < 400 ? 720 : 80;
+    const by = this.player.y < 300 ? 520 : 80;
+    this.boss = this.createBossMonkey(bx, by);
+    this.physics.add.existing(this.boss);
+    this.boss.body.setCollideWorldBounds(true);
+    this.boss.body.setCircle(40, -40, -50);
+    this.physics.add.collider(this.boss, this.trees);
+    this.bossActive = true; this.bossHP = this.bossMaxHP;
+    this.bossBarG.setVisible(true); this.bossLabel.setVisible(true);
+    this.drawBossBar();
+    this.cameras.main.shake(400, 0.015);
+    this.warnText.setStyle({ fontSize:'26px', fill:'#ff2222', fontFamily:'Arial Black', stroke:'#111', strokeThickness:4 });
+    this.warnText.setText('THE BOSS IS HERE! (15 hits!)');
+    this.time.delayedCall(3000, () => { if (!this.dead) this.warnText.setText(''); });
+  }
+
+  shoot(pointer) {
+    if (this.dead) return;
+    if (this.time.now - this.lastShot < this.shotCooldown) return;
+    this.lastShot = this.time.now;
+    const color = PAINT_COLORS[this.paintColorIdx++ % PAINT_COLORS.length];
+    const dx = pointer.x - this.player.x, dy = pointer.y - this.player.y;
+    const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+    const ball = this.add.circle(this.player.x, this.player.y, 7, color);
+    ball._vx = (dx/dist) * 520; ball._vy = (dy/dist) * 520; ball._color = color;
+    this.paintballs.push(ball);
+  }
+
+  splatEffect(x, y, color) {
+    for (let i = 0; i < 9; i++) {
+      const angle = (i/9)*Math.PI*2 + Math.random()*0.5;
+      const r = Phaser.Math.Between(12, 38);
+      const dot = this.add.circle(x, y, Phaser.Math.Between(3,8), color);
+      this.tweens.add({ targets:dot, x:x+Math.cos(angle)*r, y:y+Math.sin(angle)*r, alpha:0, duration:Phaser.Math.Between(300,600), onComplete:()=>dot.destroy() });
+    }
+    // Permanent paint blob on ground
+    const blob = this.add.circle(x, y, Phaser.Math.Between(4,9), color, 0.55);
+    this.time.delayedCall(4000, () => { if (blob.active) blob.destroy(); });
+  }
+
+  hitTagger(tagger, color) {
+    const hp = (this.taggerHP.get(tagger) || 3) - 1;
+    this.taggerHP.set(tagger, hp);
+    // Flash to paint color
+    if (tagger.list[0]) tagger.list[0].setFillStyle(color);
+    this.time.delayedCall(160, () => { if (tagger.active && tagger.list[0]) tagger.list[0].setFillStyle(0xcc1111); });
+    if (hp <= 0) {
+      this.splatEffect(tagger.x, tagger.y, color);
+      this.taggerHP.delete(tagger);
+      this.taggers.splice(this.taggers.indexOf(tagger), 1);
+      tagger.destroy();
+      this.score++;
+      this.scoreText.setText('Score: ' + this.score);
+      GameData.bananas += 5;
+    }
+  }
+
+  hitBoss(color) {
+    this.bossHP--;
+    this.drawBossBar();
+    if (this.boss && this.boss.list[0]) this.boss.list[0].setFillStyle(color);
+    this.time.delayedCall(120, () => { if (this.boss && this.boss.active && this.boss.list[0]) this.boss.list[0].setFillStyle(0xaa0000); });
+    this.cameras.main.flash(60, 255, 100, 50, false);
+    if (this.bossHP <= 0) this.defeatBoss();
+  }
+
+  drawBossBar() {
+    this.bossBarG.clear();
+    this.bossBarG.fillStyle(0x111111); this.bossBarG.fillRect(248,565,304,28);
+    this.bossBarG.fillStyle(0x440000); this.bossBarG.fillRect(250,567,300,24);
+    const pct = Math.max(0, this.bossHP/this.bossMaxHP);
+    this.bossBarG.fillStyle(pct>0.5?0xff2222:pct>0.25?0xff8800:0xffff00);
+    this.bossBarG.fillRect(250,567,Math.floor(300*pct),24);
+  }
+
+  loseLife() {
+    if (this.invincible || this.dead) return;
+    this.lives--;
+    this.drawHearts();
+    this.cameras.main.shake(200, 0.015);
+    this.cameras.main.flash(150, 255, 0, 0, false);
+    if (this.lives <= 0) { this.triggerDeath(); return; }
+    this.invincible = true;
+    // Flash player
+    this.tweens.add({ targets: this.player, alpha: 0.3, duration: 150, yoyo: true, repeat: 6 });
+    this.time.delayedCall(2000, () => { this.invincible = false; if (this.player.active) this.player.setAlpha(1); });
+  }
+
+  triggerDeath() {
+    if (this.dead) return;
+    this.dead = true;
+    const earned = this.score * 2;
+    GameData.bananas += earned;
+    this.cameras.main.shake(400, 0.025);
+    this.time.delayedCall(600, () => this.scene.start('PaintballOverScene', { score:this.score, earned, colorIndex:this.colorIndex }));
+  }
+
+  defeatBoss() {
+    if (!this.bossActive) return;
+    this.bossActive = false;
+    this.boss.destroy(); this.boss = null;
+    this.bossBarG.setVisible(false); this.bossLabel.setVisible(false);
+    const earned = this.score * 2 + 50;
+    GameData.bananas += earned;
+    this.cameras.main.shake(500, 0.025);
+    this.cameras.main.flash(300, 255, 100, 200, false);
+    this.warnText.setStyle({ fontSize:'30px', fill:'#ff44cc', fontFamily:'Arial Black', stroke:'#333', strokeThickness:5 });
+    this.warnText.setText('BOSS SPLATTED!');
+    this.time.delayedCall(2500, () => { this.dead = true; this.scene.start('PaintballVictoryScene', { score:this.score, earned, colorIndex:this.colorIndex }); });
+  }
+
+  spawnTrailParticle() {
+    const trail = this.equippedTrail;
+    if (trail === 'none') return;
+    let obj;
+    const cols = [0xff0000,0xff8800,0xffff00,0x00ff00,0x0088ff,0x8800ff];
+    if (trail==='trail_stars') obj = this.add.star(this.player.x, this.player.y, 5, 3, 7, 0xffe066);
+    else if (trail==='trail_fire') obj = this.add.circle(this.player.x, this.player.y, Phaser.Math.Between(4,9), Phaser.Utils.Array.GetRandom([0xff6600,0xff3300,0xffaa00]));
+    else if (trail==='trail_rainbow') { obj = this.add.circle(this.player.x, this.player.y, 6, cols[this._trailColorIdx++%cols.length]); }
+    else if (trail==='trail_ice') obj = this.add.circle(this.player.x, this.player.y, Phaser.Math.Between(4,8), 0x88eeff);
+    if (obj) this.tweens.add({ targets:obj, alpha:0, scale:0.1, duration:380, onComplete:()=>obj.destroy() });
+  }
+
+  update(time, delta) {
+    if (this.dead) return;
+
+    const spd = 240;
+    let vx = 0, vy = 0;
+    if (this.cursors.left.isDown  || this.wasd.left.isDown)  vx = -spd;
+    if (this.cursors.right.isDown || this.wasd.right.isDown) vx =  spd;
+    if (this.cursors.up.isDown    || this.wasd.up.isDown)    vy = -spd;
+    if (this.cursors.down.isDown  || this.wasd.down.isDown)  vy =  spd;
+    this.player.body.setVelocity(vx, vy);
+
+    this._trailTick += delta;
+    if (this._trailTick > 55 && (vx!==0||vy!==0)) { this._trailTick=0; this.spawnTrailParticle(); }
+
+    // Move paintballs + collision
+    for (let i = this.paintballs.length-1; i >= 0; i--) {
+      const ball = this.paintballs[i];
+      if (!ball.active) { this.paintballs.splice(i,1); continue; }
+      ball.x += ball._vx*(delta/1000);
+      ball.y += ball._vy*(delta/1000);
+      if (ball.x<-20||ball.x>820||ball.y<-20||ball.y>620) { ball.destroy(); this.paintballs.splice(i,1); continue; }
+      let hit = false;
+      for (const t of this.taggers) {
+        if (t.active && Phaser.Math.Distance.Between(ball.x,ball.y,t.x,t.y)<26) {
+          this.splatEffect(ball.x,ball.y,ball._color); this.hitTagger(t,ball._color);
+          ball.destroy(); this.paintballs.splice(i,1); hit=true; break;
+        }
+      }
+      if (hit) continue;
+      if (this.bossActive&&this.boss&&Phaser.Math.Distance.Between(ball.x,ball.y,this.boss.x,this.boss.y)<52) {
+        this.splatEffect(ball.x,ball.y,ball._color); this.hitBoss(ball._color);
+        ball.destroy(); this.paintballs.splice(i,1);
+      }
+    }
+
+    // Tagger AI
+    const mult = 1 + this.survivalTime*0.01;
+    this.taggers.forEach(t => {
+      if (!t.active) return;
+      const dx=this.player.x-t.x, dy=this.player.y-t.y;
+      const dist=Math.sqrt(dx*dx+dy*dy);
+      if (dist>5) t.body.setVelocity((dx/dist)*Math.min(140*mult,260),(dy/dist)*Math.min(140*mult,260));
+      if (dist<28) this.loseLife();
+    });
+
+    // Boss AI
+    if (this.bossActive&&this.boss) {
+      const dx=this.player.x-this.boss.x, dy=this.player.y-this.boss.y;
+      const dist=Math.sqrt(dx*dx+dy*dy);
+      if (dist>10) this.boss.body.setVelocity((dx/dist)*100,(dy/dist)*100);
+      if (dist<52) this.loseLife();
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+class PaintballOverScene extends Phaser.Scene {
+  constructor() { super('PaintballOverScene'); }
+  create(data) {
+    this.cameras.main.setBackgroundColor('#0a0a1a');
+    this.add.text(400, 100, 'GAME OVER!', { fontSize: '52px', fill: '#ff44cc', fontFamily: 'Arial Black', stroke: '#222', strokeThickness: 5 }).setOrigin(0.5);
+    this.add.text(400, 195, 'Monkeys splatted:', { fontSize: '22px', fill: '#ffffff', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 262, '' + data.score, { fontSize: '72px', fill: '#ff44cc', fontFamily: 'Arial Black' }).setOrigin(0.5);
+    this.add.text(400, 338, '+ ' + data.earned + ' bananas earned!', { fontSize: '20px', fill: '#ffe066', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 368, 'Total: ' + GameData.bananas + ' bananas', { fontSize: '16px', fill: '#888888', fontFamily: 'Arial' }).setOrigin(0.5);
+    let msg = 'Hit them 3 times to splat them!';
+    if (data.score >= 20) msg = 'Insane! Paintball legend!';
+    else if (data.score >= 10) msg = 'Nice shooting! Try to reach 20!';
+    else if (data.score >= 5)  msg = 'Getting there! Aim for 10!';
+    this.add.text(400, 410, msg, { fontSize: '18px', fill: '#aaffaa', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 462, 'SPACE = Play Again    S = Shop    C = Change Color', { fontSize: '17px', fill: '#aaaaff', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('PaintballScene', { colorIndex: data.colorIndex }));
+    this.input.keyboard.once('keydown-S',     () => this.scene.start('ShopScene'));
+    this.input.keyboard.once('keydown-C',     () => this.scene.start('ColorScene', { mode: 'paintball' }));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+class PaintballVictoryScene extends Phaser.Scene {
+  constructor() { super('PaintballVictoryScene'); }
+  create(data) {
+    this.cameras.main.setBackgroundColor('#0a0520');
+    this.add.text(400, 90, 'YOU WIN!', { fontSize: '64px', fill: '#ff44cc', fontFamily: 'Arial Black', stroke: '#333', strokeThickness: 6 }).setOrigin(0.5);
+    this.add.text(400, 175, 'You splatted the boss!', { fontSize: '26px', fill: '#ffaaff', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 235, 'Monkeys splatted: ' + data.score, { fontSize: '30px', fill: '#ffffff', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 288, '+ ' + data.earned + ' bananas! (50 bonus!)', { fontSize: '20px', fill: '#ffe066', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.add.text(400, 322, 'Total: ' + GameData.bananas + ' bananas', { fontSize: '16px', fill: '#888888', fontFamily: 'Arial' }).setOrigin(0.5);
+    for (let i = 0; i < 24; i++) {
+      const dot = this.add.circle(Phaser.Math.Between(40,760), Phaser.Math.Between(370,560), Phaser.Math.Between(5,14), Phaser.Utils.Array.GetRandom(PAINT_COLORS));
+      this.tweens.add({ targets:dot, y:dot.y-Phaser.Math.Between(30,80), alpha:0, duration:Phaser.Math.Between(800,2000), repeat:-1, delay:Phaser.Math.Between(0,2000) });
+    }
+    this.add.text(400, 470, 'SPACE = Play Again    S = Shop    C = Change Color', { fontSize: '17px', fill: '#aaaaff', fontFamily: 'Arial' }).setOrigin(0.5);
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('PaintballScene', { colorIndex: data.colorIndex }));
+    this.input.keyboard.once('keydown-S',     () => this.scene.start('ShopScene'));
+    this.input.keyboard.once('keydown-C',     () => this.scene.start('ColorScene', { mode: 'paintball' }));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+class SandboxScene extends Phaser.Scene {
+  constructor() { super('SandboxScene'); }
+
+  create() {
+    this.blocks    = new Map();
+    this.generated = new Set();
+    this.selBlock  = 1;
+    this.removing  = false;
+    this.pvx = 0; this.pvy = 0;
+    this.onGround  = false;
+
+    this.physics.world.setBounds(-8000, -4000, 16000, 8000);
+    this.cameras.main.setBounds(-8000, -4000, 16000, 8000);
+    this.cameras.main.setBackgroundColor('#5aaaf5');
+
+    // Generate chunks around start
+    for (let c = -5; c <= 5; c++) this.genChunk(c);
+
+    const sy = this.surfAt(0);
+    this.px = 0;
+    this.py = sy * SANDBOX_BS - SB_PH;
+
+    this.wgfx   = this.add.graphics().setDepth(1);
+    this.monkey = this.buildMonkey();
+    this.monkey.setDepth(5);
+    this.cameras.main.startFollow(this.monkey, true, 0.1, 0.08);
+
+    this.buildHUD();
+
+    this.game.canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.wasd    = this.input.keyboard.addKeys({ up: 'W', left: 'A', right: 'D' });
+
+    for (let i = 1; i <= 8; i++)
+      this.input.keyboard.on(`keydown-${i}`, () => { this.selBlock = i; this.refreshHUD(); });
+    this.input.keyboard.on('keydown-E',   () => { this.removing = !this.removing; this.refreshHUD(); });
+    this.input.keyboard.once('keydown-ESC', () => this.scene.start('TitleScene'));
+
+    this.input.on('pointerdown', ptr => {
+      if (ptr.y > 555) return;  // ignore HUD clicks
+      if (ptr.rightButtonDown()) this.doBlock(ptr, true);
+      else                        this.doBlock(ptr, false);
+    });
+  }
+
+  surfAt(gx) {
+    return Math.round(2.5 * Math.sin(gx * 0.14) + Math.sin(gx * 0.31));
+  }
+
+  genChunk(cx) {
+    if (this.generated.has(cx)) return;
+    this.generated.add(cx);
+    for (let dx = 0; dx < 20; dx++) {
+      const gx = cx * 20 + dx;
+      const s  = this.surfAt(gx);
+      this.setBlock(gx, s,     1);                          // grass
+      for (let d = 1; d <= 4;  d++) this.setBlock(gx, s + d, 2); // dirt
+      for (let d = 5; d <= 28; d++) this.setBlock(gx, s + d, 3); // stone
+    }
+  }
+
+  setBlock(gx, gy, t) {
+    const k = `${gx},${gy}`;
+    t ? this.blocks.set(k, t) : this.blocks.delete(k);
+  }
+  getBlock(gx, gy) { return this.blocks.get(`${gx},${gy}`) || 0; }
+  isSolid(gx, gy)  { return this.getBlock(gx, gy) !== 0; }
+
+  hits(cx, cy) {
+    const res = [];
+    const BS  = SANDBOX_BS;
+    const gx1 = Math.floor((cx - SB_PW) / BS);
+    const gx2 = Math.floor((cx + SB_PW - 1) / BS);
+    const gy1 = Math.floor((cy - SB_PH) / BS);
+    const gy2 = Math.floor((cy + SB_PH - 1) / BS);
+    for (let gx = gx1; gx <= gx2; gx++)
+      for (let gy = gy1; gy <= gy2; gy++)
+        if (this.isSolid(gx, gy)) res.push({ gx, gy });
+    return res;
+  }
+
+  buildMonkey() {
+    const col = COLORS[0];
+    const c   = this.add.container(this.px, this.py);
+    c.add(this.add.ellipse(0, 4, 38, 42, col.body));
+    c.add(this.add.circle(0, -22, 17, col.body));
+    c.add(this.add.circle(0, -22, 11, col.face));
+    c.add(this.add.circle(-5, -24, 3, 0x111111));
+    c.add(this.add.circle( 5, -24, 3, 0x111111));
+    c.add(this.add.ellipse(-22, 6, 12, 28, col.body));
+    c.add(this.add.ellipse( 22, 6, 12, 28, col.body));
+    return c;
+  }
+
+  buildHUD() {
+    this.selMarkers = [];
+    SANDBOX_BLOCKS.slice(1).forEach((bt, i) => {
+      const x = 50 + i * 100, y = 576;
+      this.add.rectangle(x, y, 80, 40, bt.color)
+        .setScrollFactor(0).setDepth(20).setStrokeStyle(1, 0x555555)
+        .setInteractive().on('pointerdown', () => { this.selBlock = i + 1; this.refreshHUD(); });
+      this.add.text(x, y, bt.name, {
+        fontSize: '11px', fill: '#fff', stroke: '#000', strokeThickness: 2, fontFamily: 'Arial'
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(21);
+      this.selMarkers.push(
+        this.add.rectangle(x, y, 84, 44).setStrokeStyle(3, 0xffe066)
+          .setScrollFactor(0).setDepth(22).setVisible(false)
+      );
+    });
+
+    this.modeText = this.add.text(400, 14, '', {
+      fontSize: '13px', fill: '#fff', stroke: '#000', strokeThickness: 2, fontFamily: 'Arial'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(20);
+
+    this.coordText = this.add.text(4, 4, '', {
+      fontSize: '12px', fill: '#fff', stroke: '#000', strokeThickness: 1, fontFamily: 'Arial'
+    }).setScrollFactor(0).setDepth(20);
+
+    this.refreshHUD();
+  }
+
+  refreshHUD() {
+    this.selMarkers.forEach((m, i) => m.setVisible(i + 1 === this.selBlock));
+    this.modeText.setText(
+      (this.removing ? '[REMOVE]' : '[PLACE]') +
+      '  E=Switch  Right-click=Remove  1-8=Block  WASD/Arrows=Move  Space=Jump  ESC=Menu'
+    );
+  }
+
+  doBlock(ptr, remove) {
+    const BS  = SANDBOX_BS;
+    const gx  = Math.floor(ptr.worldX / BS);
+    const gy  = Math.floor(ptr.worldY / BS);
+    if (remove || this.removing) {
+      this.setBlock(gx, gy, 0);
+    } else {
+      // Don't place inside player
+      if (gx >= Math.floor((this.px - SB_PW) / BS) &&
+          gx <= Math.floor((this.px + SB_PW) / BS) &&
+          gy >= Math.floor((this.py - SB_PH) / BS) &&
+          gy <= Math.floor((this.py + SB_PH) / BS)) return;
+      this.setBlock(gx, gy, this.selBlock);
+    }
+  }
+
+  renderWorld() {
+    const cam = this.cameras.main;
+    const BS  = SANDBOX_BS;
+    const gx1 = Math.floor(cam.scrollX / BS) - 1;
+    const gx2 = Math.ceil((cam.scrollX + cam.width)  / BS) + 1;
+    const gy1 = Math.floor(cam.scrollY / BS) - 1;
+    const gy2 = Math.ceil((cam.scrollY + cam.height) / BS) + 1;
+
+    this.wgfx.clear();
+
+    for (let gx = gx1; gx <= gx2; gx++) {
+      for (let gy = gy1; gy <= gy2; gy++) {
+        const t  = this.getBlock(gx, gy);
+        if (!t) continue;
+        const bt = SANDBOX_BLOCKS[t];
+        const wx = gx * BS, wy = gy * BS;
+        this.wgfx.fillStyle(bt.color, 1);
+        this.wgfx.fillRect(wx, wy, BS - 1, BS - 1);
+        if (bt.top) {
+          this.wgfx.fillStyle(bt.top, 1);
+          this.wgfx.fillRect(wx, wy, BS - 1, 6);
+        }
+      }
+    }
+
+    // Hover outline
+    const ptr = this.input.activePointer;
+    const hgx = Math.floor(ptr.worldX / BS);
+    const hgy = Math.floor(ptr.worldY / BS);
+    this.wgfx.lineStyle(2, this.removing ? 0xff4444 : 0xffffff, 0.85);
+    this.wgfx.strokeRect(hgx * BS, hgy * BS, BS - 1, BS - 1);
+  }
+
+  update(time, delta) {
+    const dt   = Math.min(delta / 1000, 0.05);
+    const BS   = SANDBOX_BS;
+    const SPEED = 230, GRAV = 900, JUMP = -480;
+
+    // Generate chunks near player
+    const pc = Math.floor(this.px / BS / 20);
+    for (let c = pc - 3; c <= pc + 3; c++) this.genChunk(c);
+
+    // Jump (uses onGround from end of previous frame)
+    if ((this.cursors.up.isDown || this.wasd.up.isDown || this.cursors.space.isDown) && this.onGround) {
+      this.pvy = JUMP;
+      this.onGround = false;
+    }
+
+    // Gravity
+    this.pvy = Math.min(this.pvy + GRAV * dt, 1000);
+
+    // Horizontal move + resolve collision
+    let mvx = 0;
+    if (this.cursors.left.isDown  || this.wasd.left.isDown)  mvx = -SPEED;
+    if (this.cursors.right.isDown || this.wasd.right.isDown) mvx =  SPEED;
+
+    const hx = this.hits(this.px + mvx * dt, this.py);
+    if (hx.length === 0) {
+      this.px += mvx * dt;
+    } else if (mvx > 0) {
+      this.px = Math.min(...hx.map(b => b.gx * BS)) - SB_PW;
+    } else if (mvx < 0) {
+      this.px = Math.max(...hx.map(b => (b.gx + 1) * BS)) + SB_PW;
+    }
+
+    // Vertical move + resolve collision
+    const hy = this.hits(this.px, this.py + this.pvy * dt);
+    if (hy.length === 0) {
+      this.py += this.pvy * dt;
+    } else {
+      if (this.pvy >= 0)
+        this.py = Math.min(...hy.map(b => b.gy * BS)) - SB_PH;
+      else
+        this.py = Math.max(...hy.map(b => (b.gy + 1) * BS)) + SB_PH;
+      this.pvy = 0;
+    }
+
+    // Ground check
+    const fgy = Math.floor((this.py + SB_PH + 2) / BS);
+    const flx = Math.floor((this.px - SB_PW + 2) / BS);
+    const frx = Math.floor((this.px + SB_PW - 2) / BS);
+    this.onGround = false;
+    for (let gx = flx; gx <= frx; gx++)
+      if (this.isSolid(gx, fgy)) { this.onGround = true; break; }
+
+    // Respawn if fallen into void
+    if (this.py > 3000) {
+      this.py  = this.surfAt(Math.round(this.px / BS)) * BS - SB_PH - BS * 2;
+      this.pvy = 0;
+    }
+
+    this.monkey.setPosition(this.px, this.py);
+    this.coordText.setText(`X:${Math.floor(this.px/BS)}  Y:${-Math.floor(this.py/BS)}`);
+    this.renderWorld();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+const config = {
+  type: Phaser.AUTO,
+  width: 800, height: 600,
+  physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+  scene: [TitleScene, ColorScene, ShopScene, MapSpinnerScene, GameScene, GameOverScene, VictoryScene, PaintballScene, PaintballOverScene, PaintballVictoryScene, SandboxScene]
+};
+
+const game = new Phaser.Game(config);
+</script>
+</body>
+</html>

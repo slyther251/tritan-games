@@ -1,0 +1,2415 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>UFO Fighter</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+
+// ── PLASMA BACKGROUND ────────────────────────────────────────────────────────
+function initPlasma(scene, alpha) {
+  const key = 'plasma_' + scene.sys.key;
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  scene._plasmaTex   = scene.textures.createCanvas(key, 80, 60);
+  scene._plasmaImg   = scene.add.image(400, 300, key)
+    .setDisplaySize(800, 600).setDepth(-5).setAlpha(alpha !== undefined ? alpha : 1);
+  scene._plasmaTime  = 0;
+  scene._plasmaIData = scene._plasmaTex.context.createImageData(80, 60);
+}
+
+function tickPlasma(scene, delta) {
+  if (!scene._plasmaTex) return;
+  scene._plasmaTime += delta * 0.001;
+  const t = scene._plasmaTime;
+  const d = scene._plasmaIData.data;
+  for (let y = 0; y < 60; y++) {
+    for (let x = 0; x < 80; x++) {
+      const v = Math.sin(x / 6  + t * 2.1) +
+                Math.sin(y / 5  + t * 1.7) +
+                Math.sin((x + y) / 10 + t) +
+                Math.sin(Math.sqrt(x * x + y * y) / 8);
+      const r = Math.sin(v * Math.PI)         * 127 + 128 | 0;
+      const g = Math.sin(v * Math.PI + 2.094) * 127 + 128 | 0;
+      const b = Math.sin(v * Math.PI + 4.189) * 127 + 128 | 0;
+      const i = (y * 80 + x) * 4;
+      d[i] = r; d[i+1] = g; d[i+2] = b; d[i+3] = 255;
+    }
+  }
+  scene._plasmaTex.context.putImageData(scene._plasmaIData, 0, 0);
+  scene._plasmaTex.refresh();
+}
+
+// ── SANS (Undertale) background character ────────────────────────────────────
+function drawSans(scene, cx, cy, s, alpha, depth) {
+  const g = scene.add.graphics();
+  if (alpha  !== undefined) g.setAlpha(alpha);
+  if (depth  !== undefined) g.setDepth(depth);
+
+  // Shorts
+  g.fillStyle(0x2a2a55);
+  g.fillRect(cx - 33*s, cy + 72*s, 28*s, 38*s);
+  g.fillRect(cx + 5*s,  cy + 72*s, 28*s, 38*s);
+
+  // Slippers
+  g.fillStyle(0x888898);
+  g.fillEllipse(cx - 19*s, cy + 112*s, 44*s, 17*s);
+  g.fillEllipse(cx + 19*s, cy + 112*s, 44*s, 17*s);
+
+  // Hoodie body
+  g.fillStyle(0x4d60cc);
+  g.fillRoundedRect(cx - 50*s, cy + 2*s, 100*s, 86*s, 16*s);
+
+  // Hoodie center zipper stripe
+  g.fillStyle(0x3a4daa);
+  g.fillRect(cx - 6*s, cy + 2*s, 12*s, 86*s);
+
+  // Sleeves
+  g.fillStyle(0x4d60cc);
+  g.fillRoundedRect(cx - 84*s, cy + 10*s, 38*s, 21*s, 9*s);
+  g.fillRoundedRect(cx + 46*s, cy + 10*s, 38*s, 21*s, 9*s);
+
+  // Skeleton hands
+  g.fillStyle(0xe5e5e5);
+  g.fillCircle(cx - 82*s, cy + 29*s, 11*s);
+  g.fillCircle(cx + 82*s, cy + 29*s, 11*s);
+
+  // Neck
+  g.fillStyle(0xd8d8d8);
+  g.fillRect(cx - 8*s, cy - 6*s, 16*s, 11*s);
+
+  // Head
+  g.fillStyle(0xededed);
+  g.fillEllipse(cx, cy - 46*s, 86*s, 80*s);
+
+  // Blush marks
+  g.fillStyle(0xffaaaa);
+  g.fillEllipse(cx - 30*s, cy - 35*s, 18*s, 10*s);
+  g.fillEllipse(cx + 30*s, cy - 35*s, 18*s, 10*s);
+
+  // Eye sockets
+  g.fillStyle(0x1a1a1a);
+  g.fillEllipse(cx - 19*s, cy - 50*s, 24*s, 19*s);
+  g.fillEllipse(cx + 19*s, cy - 50*s, 24*s, 19*s);
+
+  // Left eye — white pupil
+  g.fillStyle(0xffffff);
+  g.fillCircle(cx - 19*s, cy - 50*s, 6*s);
+
+  // Right eye — glowing blue (special eye)
+  g.fillStyle(0x2277ff);
+  g.fillCircle(cx + 19*s, cy - 50*s, 8*s);
+  g.fillStyle(0x99ccff);
+  g.fillCircle(cx + 21*s, cy - 52*s, 3*s);
+
+  // Nose holes
+  g.fillStyle(0x2a2a2a);
+  g.fillCircle(cx - 4*s, cy - 36*s, 3*s);
+  g.fillCircle(cx + 4*s, cy - 36*s, 3*s);
+
+  // Wide grin
+  g.fillStyle(0x1a1a1a);
+  g.fillRoundedRect(cx - 25*s, cy - 27*s, 50*s, 15*s, 5*s);
+
+  // Teeth
+  g.fillStyle(0xededed);
+  for (let i = 0; i < 5; i++) {
+    g.fillRect(cx - 22*s + i * 10*s, cy - 26*s, 7*s, 7*s);
+  }
+
+  return g;
+}
+
+// ── SHIP DRAWING FUNCTIONS (used in shop preview + game) ─────────────────────
+function drawShipArtemis(g, cx, cy, s) {
+  s = s || 1;
+  g.fillStyle(0xddddee);
+  g.fillRoundedRect(cx-26*s, cy-24*s, 46*s, 9*s, 3*s);
+  g.fillStyle(0xff6600);
+  g.fillRect(cx-10*s, cy-24*s, 14*s, 9*s);
+  g.fillStyle(0xccccdd);
+  g.fillTriangle(cx+20*s, cy-24*s, cx+20*s, cy-15*s, cx+28*s, cy-19*s);
+  g.fillStyle(0x444455);
+  g.fillEllipse(cx-28*s, cy-20*s, 7*s, 7*s);
+  g.fillStyle(0xff8800);
+  g.fillCircle(cx-30*s, cy-20*s, 3*s);
+  g.fillStyle(0xddddee);
+  g.fillRoundedRect(cx-26*s, cy+15*s, 46*s, 9*s, 3*s);
+  g.fillStyle(0xff6600);
+  g.fillRect(cx-10*s, cy+15*s, 14*s, 9*s);
+  g.fillStyle(0xccccdd);
+  g.fillTriangle(cx+20*s, cy+24*s, cx+20*s, cy+15*s, cx+28*s, cy+19*s);
+  g.fillStyle(0x444455);
+  g.fillEllipse(cx-28*s, cy+20*s, 7*s, 7*s);
+  g.fillStyle(0xff8800);
+  g.fillCircle(cx-30*s, cy+20*s, 3*s);
+  g.fillStyle(0xdd5500);
+  g.fillRoundedRect(cx-30*s, cy-9*s, 54*s, 18*s, 4*s);
+  g.fillStyle(0xffffff);
+  g.fillRect(cx+2*s, cy-9*s, 10*s, 18*s);
+  g.fillStyle(0x999aaa);
+  g.fillRect(cx+20*s, cy-7*s, 7*s, 14*s);
+  g.fillStyle(0xddddee);
+  g.fillRoundedRect(cx+27*s, cy-7*s, 11*s, 14*s, 2*s);
+  g.fillStyle(0xaabbcc);
+  g.fillTriangle(cx+38*s, cy-7*s, cx+38*s, cy+7*s, cx+50*s, cy);
+  g.fillStyle(0xaaaaaa);
+  g.fillRect(cx+50*s, cy-1*s, 9*s, 2*s);
+  g.fillStyle(0xee3300);
+  g.fillRect(cx+57*s, cy-2*s, 4*s, 4*s);
+  g.fillStyle(0x445566);
+  g.fillEllipse(cx-32*s, cy-5*s, 9*s, 8*s);
+  g.fillEllipse(cx-32*s, cy+5*s, 9*s, 8*s);
+  g.fillStyle(0xff9900);
+  g.fillCircle(cx-35*s, cy-5*s, 4*s);
+  g.fillCircle(cx-35*s, cy+5*s, 4*s);
+  g.fillStyle(0xffffff);
+  g.fillCircle(cx-36*s, cy-5*s, 2*s);
+  g.fillCircle(cx-36*s, cy+5*s, 2*s);
+}
+
+function drawShipStarViper(g, cx, cy, s) {
+  s = s || 1;
+  // Delta wings
+  g.fillStyle(0x3366cc);
+  g.fillTriangle(cx+14*s, cy, cx-28*s, cy-5*s, cx-18*s, cy-36*s);
+  g.fillTriangle(cx+14*s, cy, cx-28*s, cy+5*s, cx-18*s, cy+36*s);
+  // Fuselage
+  g.fillStyle(0x2255cc);
+  g.fillRoundedRect(cx-28*s, cy-8*s, 60*s, 16*s, 5*s);
+  // Nose
+  g.fillStyle(0x88aaff);
+  g.fillTriangle(cx+32*s, cy-8*s, cx+32*s, cy+8*s, cx+52*s, cy);
+  // Cockpit
+  g.fillStyle(0x66ccff);
+  g.fillEllipse(cx+14*s, cy, 20*s, 10*s);
+  g.fillStyle(0xaaddff);
+  g.fillEllipse(cx+16*s, cy-2*s, 8*s, 5*s);
+  // Wing tip lights
+  g.fillStyle(0x99bbff);
+  g.fillCircle(cx-18*s, cy-36*s, 5*s);
+  g.fillCircle(cx-18*s, cy+36*s, 5*s);
+  // Engine nozzles
+  g.fillStyle(0x334466);
+  g.fillEllipse(cx-30*s, cy-5*s, 9*s, 8*s);
+  g.fillEllipse(cx-30*s, cy+5*s, 9*s, 8*s);
+  // Engine glow
+  g.fillStyle(0x4499ff);
+  g.fillCircle(cx-33*s, cy-5*s, 4*s);
+  g.fillCircle(cx-33*s, cy+5*s, 4*s);
+  g.fillStyle(0xccddff);
+  g.fillCircle(cx-35*s, cy-5*s, 2*s);
+  g.fillCircle(cx-35*s, cy+5*s, 2*s);
+}
+
+function drawShipUFO(g, cx, cy, s) {
+  s = s || 1;
+  // Saucer rim
+  g.fillStyle(0x556677);
+  g.fillEllipse(cx, cy+4*s, 88*s, 22*s);
+  // Main disc
+  g.fillStyle(0xaabbcc);
+  g.fillEllipse(cx, cy, 80*s, 18*s);
+  // Metallic shine
+  g.fillStyle(0xddeeff);
+  g.fillEllipse(cx-12*s, cy-4*s, 30*s, 7*s);
+  // Dome
+  g.fillStyle(0x33cc77);
+  g.fillEllipse(cx, cy-10*s, 36*s, 26*s);
+  g.fillStyle(0x88ffcc);
+  g.fillEllipse(cx-5*s, cy-14*s, 14*s, 10*s);
+  // Alien pilot silhouette
+  g.fillStyle(0x116633);
+  g.fillCircle(cx, cy-10*s, 8*s);
+  g.fillEllipse(cx, cy-3*s, 10*s, 6*s);
+  // Engine lights
+  g.fillStyle(0x00eeff);
+  g.fillCircle(cx-26*s, cy+8*s, 5*s);
+  g.fillCircle(cx, cy+9*s, 5*s);
+  g.fillCircle(cx+26*s, cy+8*s, 5*s);
+  g.fillStyle(0xffffff);
+  g.fillCircle(cx-26*s, cy+8*s, 2*s);
+  g.fillCircle(cx, cy+9*s, 2*s);
+  g.fillCircle(cx+26*s, cy+8*s, 2*s);
+}
+
+function drawShipFireHawk(g, cx, cy, s) {
+  s = s || 1;
+  // Tail feathers fanned out (back/left, engine side)
+  g.fillStyle(0x4a2800);
+  g.fillTriangle(cx-24*s, cy-3*s, cx-52*s, cy-24*s, cx-46*s, cy-7*s);
+  g.fillTriangle(cx-24*s, cy-3*s, cx-54*s, cy-12*s, cx-47*s, cy-2*s);
+  g.fillTriangle(cx-24*s, cy-3*s, cx-24*s, cy+3*s, cx-56*s, cy);
+  g.fillTriangle(cx-24*s, cy+3*s, cx-54*s, cy+12*s, cx-47*s, cy+2*s);
+  g.fillTriangle(cx-24*s, cy+3*s, cx-52*s, cy+24*s, cx-46*s, cy+7*s);
+  // Tail feather light stripes
+  g.fillStyle(0x7a5020);
+  g.fillTriangle(cx-28*s, cy-2*s, cx-50*s, cy-20*s, cx-48*s, cy-10*s);
+  g.fillTriangle(cx-28*s, cy+2*s, cx-50*s, cy+20*s, cx-48*s, cy+10*s);
+
+  // Upper wing — broad hawk soaring wing
+  g.fillStyle(0x7a3e1a);
+  g.fillTriangle(cx+8*s, cy-6*s, cx-22*s, cy-6*s, cx-16*s, cy-56*s);
+  g.fillStyle(0x9b5a2a);
+  g.fillTriangle(cx+4*s, cy-6*s, cx-12*s, cy-6*s, cx-6*s, cy-44*s);
+  // Wing tip dark patch
+  g.fillStyle(0x3d1a00);
+  g.fillTriangle(cx-18*s, cy-48*s, cx-28*s, cy-40*s, cx-14*s, cy-58*s);
+  // Wing feather lines (light streaks)
+  g.fillStyle(0xc8844a);
+  g.fillTriangle(cx+2*s, cy-6*s, cx-4*s, cy-6*s, cx-2*s, cy-32*s);
+  g.fillTriangle(cx-6*s, cy-6*s, cx-12*s, cy-6*s, cx-10*s, cy-36*s);
+
+  // Lower wing — mirror
+  g.fillStyle(0x7a3e1a);
+  g.fillTriangle(cx+8*s, cy+6*s, cx-22*s, cy+6*s, cx-16*s, cy+56*s);
+  g.fillStyle(0x9b5a2a);
+  g.fillTriangle(cx+4*s, cy+6*s, cx-12*s, cy+6*s, cx-6*s, cy+44*s);
+  g.fillStyle(0x3d1a00);
+  g.fillTriangle(cx-18*s, cy+48*s, cx-28*s, cy+40*s, cx-14*s, cy+58*s);
+  g.fillStyle(0xc8844a);
+  g.fillTriangle(cx+2*s, cy+6*s, cx-4*s, cy+6*s, cx-2*s, cy+32*s);
+  g.fillTriangle(cx-6*s, cy+6*s, cx-12*s, cy+6*s, cx-10*s, cy+36*s);
+
+  // Body (hawk torso)
+  g.fillStyle(0x7a3e1a);
+  g.fillEllipse(cx, cy, 74*s, 16*s);
+  // Cream belly
+  g.fillStyle(0xdeb887);
+  g.fillEllipse(cx+6*s, cy+2*s, 46*s, 9*s);
+  // Belly spots (hawk barring)
+  g.fillStyle(0x9b6030);
+  g.fillCircle(cx+10*s, cy+2*s, 2*s);
+  g.fillCircle(cx+3*s,  cy+3*s, 2*s);
+  g.fillCircle(cx+17*s, cy+2*s, 1.5*s);
+
+  // Head (dark brown)
+  g.fillStyle(0x3d1a00);
+  g.fillCircle(cx+28*s, cy, 13*s);
+  // White/cream forehead
+  g.fillStyle(0xd4c090);
+  g.fillEllipse(cx+30*s, cy-5*s, 10*s, 6*s);
+
+  // Eye ring (yellow)
+  g.fillStyle(0xffdd00);
+  g.fillCircle(cx+32*s, cy-3*s, 5*s);
+  // Pupil
+  g.fillStyle(0x000000);
+  g.fillCircle(cx+33*s, cy-3*s, 3*s);
+  // Eye gleam
+  g.fillStyle(0xffffff);
+  g.fillCircle(cx+33.5*s, cy-3.5*s, 1.2*s);
+
+  // Hooked beak (upper)
+  g.fillStyle(0xe8c420);
+  g.fillTriangle(cx+36*s, cy-3*s, cx+36*s, cy+2*s, cx+50*s, cy-1*s);
+  // Beak hook tip (curves down)
+  g.fillStyle(0xb89010);
+  g.fillTriangle(cx+44*s, cy-1*s, cx+50*s, cy-1*s, cx+47*s, cy+5*s);
+
+  // Engine rocket glow bursting from tail
+  g.fillStyle(0xff6600);
+  g.fillCircle(cx-52*s, cy, 7*s);
+  g.fillStyle(0xffcc00);
+  g.fillCircle(cx-55*s, cy, 4*s);
+  g.fillStyle(0xffffff);
+  g.fillCircle(cx-57*s, cy, 2*s);
+}
+
+// ── SHIP-67 ───────────────────────────────────────────────────────────────────
+function drawShip67(g, cx, cy, s) {
+  s = s || 1;
+  // Swept-back wings (behind fuselage)
+  g.fillStyle(0x0011aa);
+  g.fillTriangle(cx+10*s, cy-2*s, cx-28*s, cy-8*s, cx-18*s, cy-54*s);
+  g.fillTriangle(cx+10*s, cy+2*s, cx-28*s, cy+8*s, cx-18*s, cy+54*s);
+  // Chrome wing accent
+  g.fillStyle(0x6688cc);
+  g.fillTriangle(cx+4*s, cy-2*s, cx-16*s, cy-5*s, cx-8*s, cy-38*s);
+  g.fillTriangle(cx+4*s, cy+2*s, cx-16*s, cy+5*s, cx-8*s, cy+38*s);
+  // Wingtip danger lights
+  g.fillStyle(0xff2200); g.fillCircle(cx-18*s, cy-54*s, 5*s);
+  g.fillStyle(0xff2200); g.fillCircle(cx-18*s, cy+54*s, 5*s);
+  g.fillStyle(0xffffff); g.fillCircle(cx-18*s, cy-54*s, 2*s);
+  g.fillStyle(0xffffff); g.fillCircle(cx-18*s, cy+54*s, 2*s);
+  // Main hull
+  g.fillStyle(0x0033cc);
+  g.fillRoundedRect(cx-28*s, cy-11*s, 54*s, 22*s, 5*s);
+  // Chrome belly stripe
+  g.fillStyle(0xaabbee);
+  g.fillRoundedRect(cx-20*s, cy-6*s, 38*s, 12*s, 3*s);
+  // Top highlight
+  g.fillStyle(0x2255ff);
+  g.fillRoundedRect(cx-14*s, cy-9*s, 22*s, 5*s, 2*s);
+  // "67" badge on hull
+  g.fillStyle(0xffdd00);
+  g.fillRoundedRect(cx-4*s, cy-5*s, 18*s, 10*s, 2*s);
+  g.fillStyle(0x001188);
+  g.fillRect(cx-2*s, cy-3*s, 2*s, 6*s); g.fillRect(cx-2*s, cy-3*s, 5*s, 2*s);
+  g.fillRect(cx-2*s, cy,     5*s, 2*s); g.fillRect(cx+3*s, cy, 2*s, 3*s);
+  g.fillRect(cx-2*s, cy+3*s, 5*s, 2*s);
+  g.fillRect(cx+6*s, cy-3*s, 5*s, 2*s); g.fillRect(cx+9*s, cy-3*s, 2*s, 8*s);
+  // Gun housing
+  g.fillStyle(0x002288);
+  g.fillRoundedRect(cx+26*s, cy-9*s, 14*s, 18*s, 3*s);
+  // Dual cannon barrels
+  g.fillStyle(0x556677); g.fillRect(cx+38*s, cy-8*s, 24*s, 5*s);
+  g.fillStyle(0x556677); g.fillRect(cx+38*s, cy+3*s, 24*s, 5*s);
+  g.fillStyle(0x9aaabb); g.fillRect(cx+59*s, cy-9*s, 5*s, 7*s);
+  g.fillStyle(0x9aaabb); g.fillRect(cx+59*s, cy+2*s, 5*s, 7*s);
+  // Nose
+  g.fillStyle(0x1144ee);
+  g.fillTriangle(cx+26*s, cy-11*s, cx+26*s, cy+11*s, cx+46*s, cy);
+  // Cockpit
+  g.fillStyle(0x00eeff); g.fillEllipse(cx+6*s, cy, 17*s, 12*s);
+  g.fillStyle(0xccffff); g.fillEllipse(cx+3*s, cy-3*s, 8*s, 5*s);
+  // Triple engine nozzles
+  g.fillStyle(0x001166);
+  g.fillEllipse(cx-30*s, cy-8*s, 8*s, 7*s);
+  g.fillEllipse(cx-30*s, cy,     8*s, 7*s);
+  g.fillEllipse(cx-30*s, cy+8*s, 8*s, 7*s);
+  // Engine glow (blue plasma)
+  g.fillStyle(0x2244ff);
+  g.fillCircle(cx-33*s, cy-8*s, 4*s);
+  g.fillCircle(cx-33*s, cy,     4*s);
+  g.fillCircle(cx-33*s, cy+8*s, 4*s);
+  g.fillStyle(0xaaccff);
+  g.fillCircle(cx-35*s, cy-8*s, 2*s);
+  g.fillCircle(cx-35*s, cy,     2*s);
+  g.fillCircle(cx-35*s, cy+8*s, 2*s);
+}
+
+// ── SHIP CRAFTER ─────────────────────────────────────────────────────────────
+const CRAFT_PARTS = {
+  body:   [{name:'Standard', cost:0}, {name:'Wide Body', cost:8}, {name:'Sleek Dart', cost:12}],
+  wings:  [{name:'No Wings', cost:0}, {name:'Fins', cost:5}, {name:'Delta', cost:10}, {name:'Spread', cost:15}],
+  nose:   [{name:'Cone', cost:0}, {name:'Cannon', cost:8}, {name:'Drill', cost:12}],
+  engine: [{name:'Single Jet', cost:0}, {name:'Twin Jets', cost:8}, {name:'Boosters', cost:14}],
+  color:  [{name:'Silver',cost:0,c:0xccddee},{name:'Red',cost:5,c:0xee3322},{name:'Blue',cost:5,c:0x2255ee},{name:'Green',cost:5,c:0x22cc55},{name:'Gold',cost:10,c:0xffcc00},{name:'Purple',cost:10,c:0x8833ee}],
+};
+
+function drawShipCustom(g, cx, cy, s) {
+  const cfg = getCraftCfg();
+  const ce = CRAFT_PARTS.color[Math.min(cfg.color||0, CRAFT_PARTS.color.length-1)];
+  const col = ce ? ce.c : 0xccddee;
+  let bW, bH;
+  if      (cfg.body === 0) { bW = 24; bH = 11; }
+  else if (cfg.body === 1) { bW = 28; bH = 16; }
+  else                     { bW = 20; bH =  7; }
+
+  // Wings (behind body)
+  if (cfg.wings === 1) {
+    g.fillStyle(0x6688aa);
+    g.fillTriangle(cx-bW*s, cy, cx-bW*s, cy-26*s, cx+(bW-6)*s, cy-bH*s);
+    g.fillTriangle(cx-bW*s, cy, cx-bW*s, cy+26*s, cx+(bW-6)*s, cy+bH*s);
+  } else if (cfg.wings === 2) {
+    g.fillStyle(0x557799);
+    g.fillTriangle(cx-(bW-4)*s, cy, cx+(bW+2)*s, cy-32*s, cx+(bW+8)*s, cy);
+    g.fillTriangle(cx-(bW-4)*s, cy, cx+(bW+2)*s, cy+32*s, cx+(bW+8)*s, cy);
+  } else if (cfg.wings === 3) {
+    g.fillStyle(0x446688);
+    g.fillTriangle(cx-(bW+2)*s, cy-bH*s, cx-(bW+14)*s, cy-40*s, cx+(bW-4)*s, cy-bH*s);
+    g.fillTriangle(cx-(bW+2)*s, cy+bH*s, cx-(bW+14)*s, cy+40*s, cx+(bW-4)*s, cy+bH*s);
+  }
+
+  // Body
+  g.fillStyle(col);
+  g.fillRect(cx-bW*s, cy-bH*s, bW*2*s, bH*2*s);
+  g.fillStyle(0x8899aa);
+  g.fillRect(cx-bW*s, cy-bH*s, 6*s, bH*2*s);
+
+  // Nose
+  if (cfg.nose === 0) {
+    g.fillStyle(col);
+    g.fillTriangle(cx+bW*s, cy-bH*s, cx+bW*s, cy+bH*s, cx+(bW+22)*s, cy);
+  } else if (cfg.nose === 1) {
+    g.fillStyle(col);
+    g.fillTriangle(cx+bW*s, cy-bH*s, cx+bW*s, cy+bH*s, cx+(bW+16)*s, cy);
+    g.fillStyle(0x888888);
+    g.fillRect(cx+(bW+8)*s, cy-4*s, 18*s, 8*s);
+  } else {
+    g.fillStyle(col);
+    g.fillTriangle(cx+bW*s, cy-bH*s, cx+bW*s, cy+bH*s, cx+(bW+14)*s, cy);
+    g.fillStyle(0xaaaaaa);
+    g.fillTriangle(cx+(bW+10)*s, cy-4*s, cx+(bW+10)*s, cy+4*s, cx+(bW+26)*s, cy);
+    g.fillStyle(0xdddddd);
+    g.fillTriangle(cx+(bW+22)*s, cy-2*s, cx+(bW+22)*s, cy+2*s, cx+(bW+34)*s, cy);
+  }
+
+  // Engine flames
+  if (cfg.engine === 0) {
+    g.fillStyle(0xff6600); g.fillCircle(cx-bW*s, cy, 7*s);
+    g.fillStyle(0xffaa00); g.fillCircle(cx-bW*s, cy, 4*s);
+    g.fillStyle(0xffff00); g.fillCircle(cx-bW*s, cy, 2*s);
+  } else if (cfg.engine === 1) {
+    g.fillStyle(0xff6600); g.fillCircle(cx-bW*s, cy-8*s, 6*s); g.fillCircle(cx-bW*s, cy+8*s, 6*s);
+    g.fillStyle(0xffaa00); g.fillCircle(cx-bW*s, cy-8*s, 3*s); g.fillCircle(cx-bW*s, cy+8*s, 3*s);
+  } else {
+    g.fillStyle(0xff4400);
+    g.fillCircle(cx-bW*s, cy-10*s, 6*s); g.fillCircle(cx-bW*s, cy, 6*s); g.fillCircle(cx-bW*s, cy+10*s, 6*s);
+    g.fillStyle(0xffcc00);
+    g.fillCircle(cx-bW*s, cy-10*s, 3*s); g.fillCircle(cx-bW*s, cy, 3*s); g.fillCircle(cx-bW*s, cy+10*s, 3*s);
+  }
+
+  // Cockpit window
+  g.fillStyle(0x88eeff); g.fillCircle(cx+4*s, cy, 7*s);
+  g.fillStyle(0xffffff); g.fillCircle(cx+2*s, cy-3*s, 3*s);
+}
+
+const SHIPS = [
+  { name: 'ARTEMIS',     desc: 'The classic NASA rocket',    color: '#ff8800', draw: drawShipArtemis  },
+  { name: 'STAR VIPER',  desc: 'Sleek delta-wing fighter',   color: '#4499ff', draw: drawShipStarViper },
+  { name: 'UFO CRUISER', desc: 'Alien tech on your side',    color: '#44ff88', draw: drawShipUFO       },
+  { name: 'FIRE HAWK',   desc: 'A real hawk soaring through space', color: '#ff8833', draw: drawShipFireHawk  },
+  { name: 'MY SHIP',    desc: 'Your custom creation! Visit CRAFTER to build it.', color: '#00ff88', draw: drawShipCustom, custom: true },
+  { name: 'SHIP-67',   desc: 'Custom-built interceptor. Dual cannons, triple boost.', color: '#00ccff', draw: drawShip67, cost: 100 },
+];
+let selectedShipIndex = 0;
+
+// ── LEVELS & XP ───────────────────────────────────────────────────────────────
+const LEVELS = [
+  { level: 1,  xp: 0,    name: 'Space Cadet'   },
+  { level: 2,  xp: 50,   name: 'Star Pilot'    },
+  { level: 3,  xp: 150,  name: 'Meteor Dodger' },
+  { level: 4,  xp: 300,  name: 'Apple Hunter'  },
+  { level: 5,  xp: 500,  name: 'Boss Fighter'  },
+  { level: 6,  xp: 750,  name: 'Galaxy Ranger' },
+  { level: 7,  xp: 1050, name: 'UFO Slayer'    },
+  { level: 8,  xp: 1400, name: 'Space Legend'  },
+  { level: 9,  xp: 1800, name: 'Cosmic Master' },
+  { level: 10, xp: 2300, name: 'UFO Champion'  },
+];
+function getTotalXP() {
+  try { return parseInt(localStorage.getItem('ufo_xp')||'0')||0; } catch(e) { return 0; }
+}
+function addXP(amount) {
+  try { localStorage.setItem('ufo_xp', String(getTotalXP() + amount)); } catch(e) {}
+}
+function getCurrentLevelData() {
+  const xp = getTotalXP(); let cur = LEVELS[0];
+  for (const lv of LEVELS) { if (xp >= lv.xp) cur = lv; else break; }
+  return cur;
+}
+function getNextLevelData() {
+  const cur = getCurrentLevelData();
+  return LEVELS.find(l => l.level === cur.level + 1) || null;
+}
+
+// ── COINS ─────────────────────────────────────────────────────────────────────
+function getCoinCount() { try { return parseInt(localStorage.getItem('ufo_coins')||'0')||0; } catch(e){ return 0; } }
+function addCoins(n)    { try { localStorage.setItem('ufo_coins', String(getCoinCount()+n)); } catch(e){} }
+function spendCoins(n)  { const c=getCoinCount(); if(c<n) return false; try { localStorage.setItem('ufo_coins', String(c-n)); return true; } catch(e){ return false; } }
+function getCraftCfg()  { try { return JSON.parse(localStorage.getItem('ufo_craft')||'{"body":0,"wings":0,"nose":0,"engine":0,"color":0,"forged":false}'); } catch(e){ return {body:0,wings:0,nose:0,engine:0,color:0,forged:false}; } }
+function saveCraftCfg(cfg) { try { localStorage.setItem('ufo_craft', JSON.stringify(cfg)); } catch(e){} }
+function getUnlockedShips() { try { return new Set(JSON.parse(localStorage.getItem('ufo_unlocked')||'[]')); } catch(e){ return new Set(); } }
+function unlockShip(idx)    { try { const s=getUnlockedShips(); s.add(idx); localStorage.setItem('ufo_unlocked', JSON.stringify([...s])); } catch(e){} }
+
+// ── QUESTS ────────────────────────────────────────────────────────────────────
+const QUESTS = [
+  { id: 'score500',  label: 'Reach 500 points',        desc: 'Keep flying and dodging!'     },
+  { id: 'score1000', label: 'Reach 1000 points',       desc: 'The boss is almost here...'   },
+  { id: 'beatBoss',  label: 'Defeat the Pizza Boss',   desc: 'Throw 5 apples at it!'        },
+  { id: 'winGame',   label: 'Win the game',             desc: 'Survive all the way to 2000!' },
+  { id: 'apples5',   label: 'Collect 5 apples',        desc: 'Grab 5 in a single game'      },
+  { id: 'allShips',  label: 'Try all 4 ships',         desc: 'Pick each ship in the shop'   },
+  { id: 'streak3',   label: 'Log in 3 days in a row',  desc: 'Come back tomorrow!',  streak: 3 },
+  { id: 'streak7',   label: 'Log in 7 days in a row',  desc: 'A whole week of flying!', streak: 7 },
+];
+function questDone(id) {
+  try {
+    const d = JSON.parse(localStorage.getItem('ufo_quests')||'{}');
+    if (!d[id]) { d[id]=true; localStorage.setItem('ufo_quests', JSON.stringify(d)); addXP(25); }
+  } catch(e) {}
+}
+function isQuestDone(id) {
+  try { return !!JSON.parse(localStorage.getItem('ufo_quests')||'{}')[id]; } catch(e) { return false; }
+}
+function markShipUsed(idx) {
+  try {
+    const used = new Set(JSON.parse(localStorage.getItem('ufo_ships')||'[]'));
+    used.add(idx);
+    localStorage.setItem('ufo_ships', JSON.stringify([...used]));
+    if (used.size >= 4) questDone('allShips');
+  } catch(e) {}
+}
+
+let _loginStreak = 0;
+function checkDailyLogin() {
+  try {
+    const today = new Date().toDateString();
+    const raw   = JSON.parse(localStorage.getItem('ufo_login') || '{"streak":0,"last":""}');
+    const yest  = new Date(); yest.setDate(yest.getDate() - 1);
+    if (raw.last === today) {
+      _loginStreak = raw.streak;
+    } else {
+      raw.streak   = (raw.last === yest.toDateString()) ? raw.streak + 1 : 1;
+      raw.last     = today;
+      _loginStreak = raw.streak;
+      localStorage.setItem('ufo_login', JSON.stringify(raw));
+      addXP(5);
+    }
+    if (_loginStreak >= 3) questDone('streak3');
+    if (_loginStreak >= 7) questDone('streak7');
+  } catch(e) { _loginStreak = 1; }
+}
+function getLoginStreak() { return _loginStreak; }
+checkDailyLogin();
+
+// ── LEVEL BACKGROUNDS ─────────────────────────────────────────────────────────
+function drawLevelBackground(scene, level) {
+  const W = scene.scale.width, H = scene.scale.height;
+  const lv = Math.max(1, Math.min(10, level));
+  const bgCols = [
+    '#05050f','#080220','#0c0500','#010d04','#100100',
+    '#00050f','#010c02','#0d0800','#040008','#010101',
+  ];
+  scene.cameras.main.setBackgroundColor(bgCols[lv - 1]);
+  const g = scene.add.graphics().setDepth(-10);
+
+  if (lv === 1) {
+    // Classic deep space — blue planet
+    g.fillStyle(0x4444aa, 0.4); g.fillCircle(680, 80, 50);
+    g.fillStyle(0x6666cc, 0.3); g.fillCircle(680, 80, 40);
+
+  } else if (lv === 2) {
+    // Star Pilot — purple nebula
+    g.fillStyle(0x4400aa, 0.18); g.fillCircle(600, 180, 140);
+    g.fillStyle(0x8800cc, 0.12); g.fillCircle(500, 350, 110);
+    g.fillStyle(0x220066, 0.22); g.fillCircle(750, 280, 100);
+    g.fillStyle(0xcc44aa, 0.5);  g.fillCircle(680, 80, 50);
+    g.fillStyle(0xee88cc, 0.3);  g.fillCircle(668, 68, 30);
+
+  } else if (lv === 3) {
+    // Meteor Dodger — asteroid belt + orange gas giant
+    g.fillStyle(0xcc6600, 0.45); g.fillCircle(720, 90, 65);
+    g.fillStyle(0xaa4400, 0.2);  g.fillEllipse(720, 108, 130, 20);
+    [[50,500],[150,80],[300,450],[550,50],[650,550],
+     [740,450],[780,200],[30,300],[200,250],[450,520]].forEach(([ax,ay], i) => {
+      g.fillStyle(0x554433, 0.35); g.fillCircle(ax, ay, [12,8,18,10,15,7,10,14,9,11][i]);
+    });
+
+  } else if (lv === 4) {
+    // Apple Hunter — green bio zone
+    g.fillStyle(0x002200, 0.2);  g.fillRect(0, 0, W, H);
+    g.fillStyle(0x004400, 0.25); g.fillCircle(700, 500, 120);
+    g.fillStyle(0x228822, 0.5);  g.fillCircle(700, 500, 75);
+    g.fillStyle(0x44bb44, 0.2);  g.fillCircle(686, 488, 50);
+    g.fillStyle(0x33aa33, 0.4);  g.fillCircle(120, 100, 40);
+    g.fillStyle(0x55cc55, 0.2);  g.fillCircle(120, 100, 58);
+
+  } else if (lv === 5) {
+    // Boss Fighter — inferno
+    g.fillStyle(0x440000, 0.4);  g.fillRect(0, 380, W, 220);
+    g.fillStyle(0x660000, 0.25); g.fillCircle(400, 600, 200);
+    g.fillStyle(0xcc2200, 0.6);  g.fillCircle(760, 80, 55);
+    g.fillStyle(0xff4400, 0.3);  g.fillCircle(760, 80, 75);
+    g.fillStyle(0xff8800, 0.15); g.fillCircle(760, 80, 105);
+
+  } else if (lv === 6) {
+    // Galaxy Ranger — galactic core
+    g.fillStyle(0x0044cc, 0.15); g.fillCircle(400, 300, 250);
+    g.fillStyle(0x002266, 0.3);  g.fillEllipse(400, 300, 500, 200);
+    g.fillStyle(0x88ccff, 0.12); g.fillCircle(400, 300, 100);
+    g.fillStyle(0x4499ff, 0.55); g.fillCircle(700, 80, 45);
+    g.fillStyle(0x88ccff, 0.3);  g.fillCircle(700, 80, 65);
+    g.fillStyle(0x2266aa, 0.3);  g.fillCircle(90, 480, 55);
+
+  } else if (lv === 7) {
+    // UFO Slayer — alien world
+    g.fillStyle(0x003300, 0.35); g.fillRect(0, 520, W, 80);
+    g.fillStyle(0x004400, 0.25); g.fillCircle(100, 540, 50);
+    g.fillStyle(0x005500, 0.25); g.fillCircle(400, 530, 70);
+    g.fillStyle(0x006600, 0.25); g.fillCircle(700, 545, 55);
+    g.fillStyle(0x44ff88, 0.45); g.fillCircle(680, 70, 35);
+    g.fillStyle(0x88ffaa, 0.2);  g.fillCircle(680, 70, 52);
+    g.fillStyle(0x22cc66, 0.45); g.fillCircle(120, 100, 28);
+    g.fillStyle(0x44ff88, 0.2);  g.fillCircle(120, 100, 44);
+
+  } else if (lv === 8) {
+    // Space Legend — golden
+    g.fillStyle(0xaa7700, 0.15); g.fillCircle(400, 300, 250);
+    g.fillStyle(0xffcc00, 0.5);  g.fillCircle(730, 70, 55);
+    g.fillStyle(0xffdd44, 0.25); g.fillCircle(730, 70, 80);
+    g.fillStyle(0xffee88, 0.12); g.fillCircle(730, 70, 110);
+    [[100,150],[200,300],[300,100],[500,250],[600,350],
+     [700,200],[150,450],[350,500],[550,100],[650,400],[50,280],[750,350]]
+      .forEach(([gx,gy]) => { g.fillStyle(0xffcc44, 0.4); g.fillCircle(gx, gy, 3); });
+
+  } else if (lv === 9) {
+    // Cosmic Master — void
+    g.fillStyle(0x220044, 0.35); g.fillEllipse(200, 300, 60, 200);
+    g.fillStyle(0x110033, 0.35); g.fillEllipse(600, 200, 50, 160);
+    g.fillStyle(0x330066, 0.6);  g.fillCircle(710, 90, 50);
+    g.fillStyle(0x550088, 0.3);  g.fillCircle(710, 90, 68);
+    g.fillStyle(0xaa44ff, 0.15); g.fillCircle(710, 90, 92);
+    g.fillStyle(0x000000, 0.85); g.fillCircle(100, 500, 42);
+    g.fillStyle(0x220033, 0.4);  g.fillCircle(100, 500, 72);
+
+  } else {
+    // UFO Champion — rainbow aurora + ringed planet + constellation
+    [0xff2222,0xff8800,0xffff00,0x00ff88,0x0088ff,0xaa44ff].forEach((c, i) => {
+      g.fillStyle(c, 0.05); g.fillRect(0, i * (H / 6), W, H / 6 + 1);
+    });
+    g.fillStyle(0x334455, 0.6);   g.fillCircle(720, 80, 52);
+    g.fillStyle(0x556677, 0.35);  g.fillCircle(708, 68, 30);
+    g.lineStyle(3, 0x889aaa, 0.5); g.strokeEllipse(720, 80, 160, 38);
+    [[50,50],[100,80],[80,120],[200,40],[250,100],
+     [600,500],[650,530],[700,490],[750,520],[580,560]].forEach(([cx,cy]) => {
+      g.fillStyle(0xffffff, 0.7); g.fillCircle(cx, cy, 2.5);
+    });
+  }
+
+  const palettes = [
+    [0xffffff, 0xddddff, 0xbbbbff],
+    [0xff88ff, 0xcc66ff, 0xffffff, 0xffaaff],
+    [0xffaa66, 0xddaa44, 0xffffff, 0xff8833],
+    [0x88ffaa, 0x44ff88, 0xffffff, 0xaaffcc],
+    [0xff6644, 0xff8866, 0xffaa44, 0xffffff],
+    [0x44aaff, 0x88ccff, 0xffffff, 0x66bbff],
+    [0x44ffcc, 0x88ffdd, 0xaaffee, 0xffffff],
+    [0xffdd44, 0xffcc22, 0xffbb00, 0xffffff],
+    [0xcc88ff, 0xaa66ff, 0x8844ff, 0xffffff],
+    [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff, 0xffffff],
+  ];
+  return palettes[lv - 1];
+}
+
+// ── FOOD BOSS DRAWING FUNCTIONS ───────────────────────────────────────────────
+function drawBossPizza(g) {
+  g.fillStyle(0xd4822a); g.fillCircle(0, 0, 62);
+  g.fillStyle(0xcc2200); g.fillCircle(0, 0, 52);
+  g.fillStyle(0xffe066); g.fillCircle(0, 0, 44);
+  g.fillStyle(0xaa1100); g.fillCircle(-20,-18,10); g.fillCircle(20,-18,10); g.fillCircle(0,22,10); g.fillCircle(-30,10,8); g.fillCircle(30,10,8);
+  g.fillStyle(0x881100); g.fillCircle(-20,-18,4); g.fillCircle(20,-18,4); g.fillCircle(0,22,4);
+  g.fillStyle(0x44aa22); g.fillRect(-8,-36,5,10); g.fillRect(12,-30,5,10); g.fillRect(-18,30,5,10);
+  g.fillStyle(0xffffff); g.fillCircle(-14,-4,11); g.fillCircle(14,-4,11);
+  g.fillStyle(0x000000); g.fillCircle(-12,-4,6); g.fillCircle(16,-4,6);
+  g.fillStyle(0xff4444); g.fillTriangle(-24,4,-6,4,-15,12); g.fillTriangle(24,4,6,4,15,12);
+  g.fillStyle(0x222222); g.fillEllipse(0,18,30,12);
+  g.fillStyle(0xffffff); g.fillRect(-8,15,5,5); g.fillRect(-1,15,5,5); g.fillRect(6,15,5,5);
+}
+
+function drawBossBurger(g) {
+  // Bottom bun
+  g.fillStyle(0xd4822a); g.fillEllipse(0,38,130,44);
+  g.fillStyle(0xf0c070); g.fillEllipse(0,30,108,24);
+  // Tomato
+  g.fillStyle(0xdd3322); g.fillEllipse(0,18,124,18);
+  // Patty
+  g.fillStyle(0x553300); g.fillEllipse(0,4,120,22);
+  g.fillStyle(0x664400); g.fillEllipse(-10,0,60,14);
+  // Cheese drips
+  g.fillStyle(0xffcc00); g.fillEllipse(0,-10,128,16);
+  [-40,-20,0,20,40].forEach(x => { g.fillStyle(0xffcc00); g.fillTriangle(x-8,-10,x+8,-10,x,2); });
+  // Lettuce
+  g.fillStyle(0x33aa33); g.fillEllipse(0,-22,134,18);
+  // Top bun
+  g.fillStyle(0xd4822a); g.fillEllipse(0,-46,126,52);
+  g.fillStyle(0xf0c070); g.fillEllipse(0,-52,100,28);
+  // Sesame seeds
+  g.fillStyle(0xeeddaa); [[-22,-54],[8,-58],[30,-52],[-5,-58]].forEach(([x,y]) => g.fillEllipse(x,y,10,6));
+  // Angry eyes
+  g.fillStyle(0xffffff); g.fillCircle(-22,-42,11); g.fillCircle(22,-42,11);
+  g.fillStyle(0x000000); g.fillCircle(-20,-42,6); g.fillCircle(24,-42,6);
+  g.fillStyle(0xff4444); g.fillTriangle(-34,-34,-14,-34,-24,-26); g.fillTriangle(34,-34,14,-34,24,-26);
+  g.fillStyle(0x222222); g.fillEllipse(0,-30,32,14);
+  g.fillStyle(0xffffff); g.fillRect(-10,-33,7,5); g.fillRect(-1,-33,7,5); g.fillRect(8,-33,7,5);
+}
+
+function drawBossDonut(g) {
+  // Donut body + frosting
+  g.fillStyle(0xee5588); g.fillCircle(0,0,62);
+  g.fillStyle(0xff88bb); g.fillCircle(-28,-40,18); g.fillCircle(2,-50,20); g.fillCircle(32,-42,16);
+  // Hole
+  g.fillStyle(0x000000); g.fillCircle(0,0,24);
+  // Sprinkles
+  const sc=[0xff2222,0x4444ff,0xffff00,0x44ff44,0xff8800,0xffffff];
+  [[-44,-14,0],[28,-28,1],[42,10,2],[-20,32,3],[-42,18,4],[12,-40,5],[38,-8,0],[-10,42,2]].forEach(([x,y,ci])=>{
+    g.fillStyle(sc[ci]); g.fillRect(x,y,8,4);
+  });
+  // Angry eyes
+  g.fillStyle(0xffffff); g.fillCircle(-18,-12,10); g.fillCircle(18,-12,10);
+  g.fillStyle(0x000000); g.fillCircle(-16,-12,5); g.fillCircle(20,-12,5);
+  g.fillStyle(0xcc2244); g.fillTriangle(-28,-4,-10,-4,-19,4); g.fillTriangle(28,-4,10,-4,19,4);
+  g.fillStyle(0x111111); g.fillEllipse(0,8,28,12);
+  g.fillStyle(0xffffff); g.fillRect(-7,5,5,4); g.fillRect(1,5,5,4);
+}
+
+function drawBossTaco(g) {
+  // Shell
+  g.fillStyle(0xddaa22); g.fillEllipse(0,20,124,80);
+  g.fillStyle(0xffcc44); g.fillEllipse(0,22,104,66);
+  // Fillings
+  g.fillStyle(0x774422); g.fillEllipse(0,-4,94,28);
+  g.fillStyle(0x33bb33); g.fillEllipse(0,-18,102,22);
+  g.fillStyle(0xffcc00); g.fillEllipse(0,-28,96,16);
+  g.fillStyle(0xcc3322); g.fillCircle(-22,-24,7); g.fillCircle(10,-26,6); g.fillCircle(32,-20,5);
+  g.fillStyle(0xffffff); g.fillEllipse(0,-34,52,12);
+  // Fold line
+  g.fillStyle(0xcc9900); g.fillRect(-52,-40,104,6);
+  // Angry eyes
+  g.fillStyle(0xffffff); g.fillCircle(-20,-44,9); g.fillCircle(20,-44,9);
+  g.fillStyle(0x000000); g.fillCircle(-18,-44,5); g.fillCircle(22,-44,5);
+  g.fillStyle(0xcc6600); g.fillTriangle(-30,-36,-12,-36,-21,-28); g.fillTriangle(30,-36,12,-36,21,-28);
+  g.fillStyle(0x331100); g.fillEllipse(0,-36,28,12);
+}
+
+function drawBossHotDog(g) {
+  // Bottom bun
+  g.fillStyle(0xd4922a); g.fillEllipse(0,30,132,36);
+  g.fillStyle(0xf0c070); g.fillEllipse(0,24,110,22);
+  // Sausage
+  g.fillStyle(0xcc4422); g.fillEllipse(0,8,122,26);
+  g.fillStyle(0xdd5533); g.fillEllipse(-10,4,80,18);
+  g.fillStyle(0xaa3311); g.fillRect(-40,0,4,16); g.fillRect(-10,0,4,16); g.fillRect(20,0,4,16);
+  // Mustard squiggle
+  g.fillStyle(0xffdd00); [-40,-20,0,20,40].forEach((x,i)=>{ g.fillCircle(x,i%2===0?-6:-2,5); });
+  // Ketchup squiggle
+  g.fillStyle(0xee2222); [-30,-10,10,30].forEach((x,i)=>{ g.fillCircle(x,i%2===0?-16:-12,5); });
+  // Top bun
+  g.fillStyle(0xd4922a); g.fillEllipse(0,-30,132,40);
+  g.fillStyle(0xf0c070); g.fillEllipse(0,-36,108,26);
+  // Angry eyes
+  g.fillStyle(0xffffff); g.fillCircle(-22,-28,10); g.fillCircle(22,-28,10);
+  g.fillStyle(0x000000); g.fillCircle(-20,-28,5); g.fillCircle(24,-28,5);
+  g.fillStyle(0xcc3300); g.fillTriangle(-32,-20,-14,-20,-23,-13); g.fillTriangle(32,-20,14,-20,23,-13);
+  g.fillStyle(0x222222); g.fillEllipse(0,-18,28,12);
+  g.fillStyle(0xffffff); g.fillRect(-8,-22,6,5); g.fillRect(1,-22,6,5);
+}
+
+function drawBossWatermelon(g) {
+  g.fillStyle(0x228822); g.fillCircle(0,0,62);
+  g.fillStyle(0xddffcc); g.fillCircle(0,0,56);
+  g.fillStyle(0xee3344); g.fillCircle(0,0,50);
+  g.fillStyle(0xff8899); g.fillCircle(-12,-16,20);
+  // Seeds
+  g.fillStyle(0x111111);
+  [[-22,-18],[12,-28],[30,0],[10,24],[-24,20],[18,14],[-6,10],[-30,4]].forEach(([x,y])=>{ g.fillEllipse(x,y,7,11); });
+  // Angry eyes
+  g.fillStyle(0xffffff); g.fillCircle(-18,-8,11); g.fillCircle(18,-8,11);
+  g.fillStyle(0x000000); g.fillCircle(-16,-8,6); g.fillCircle(20,-8,6);
+  g.fillStyle(0x00aa00); g.fillTriangle(-28,0,-10,0,-19,8); g.fillTriangle(28,0,10,0,19,8);
+  g.fillStyle(0x111111); g.fillEllipse(0,14,36,16);
+  g.fillStyle(0xffffff); g.fillRect(-10,11,8,6); g.fillRect(1,11,8,6);
+}
+
+const FOOD_BOSSES = [
+  { name: 'PIZZA BOSS',      draw: drawBossPizza      },
+  { name: 'BURGER BOSS',     draw: drawBossBurger     },
+  { name: 'DONUT BOSS',      draw: drawBossDonut      },
+  { name: 'TACO BOSS',       draw: drawBossTaco       },
+  { name: 'HOT DOG BOSS',    draw: drawBossHotDog     },
+  { name: 'WATERMELON BOSS', draw: drawBossWatermelon },
+];
+
+// ── TITLE SCENE ───────────────────────────────────────────────────────────────
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+    initPlasma(this, 1);
+    for (let i = 0; i < 120; i++) {
+      this.add.circle(Phaser.Math.Between(0,W), Phaser.Math.Between(0,H),
+        Phaser.Math.Between(1,3), 0xffffff, Phaser.Math.FloatBetween(0.3,1));
+    }
+    drawSans(this, 590, 370, 1.5, 0.62);
+    this.add.text(W/2, H/2-120, 'UFO', {
+      fontSize:'72px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#8B4513', strokeThickness:8
+    }).setOrigin(0.5);
+    this.add.text(W/2, H/2-50, 'FIGHTER', {
+      fontSize:'40px', fontFamily:'Arial Black,sans-serif',
+      color:'#00FFFF', stroke:'#003366', strokeThickness:6
+    }).setOrigin(0.5);
+    this.add.text(W/2, H/2+20, 'Arrow Keys or W/S to move up & down', {
+      fontSize:'21px', fontFamily:'Arial,sans-serif', color:'#ffffff'
+    }).setOrigin(0.5);
+    this.add.text(W/2, H/2+60, 'Dodge zombies & meteors!', {
+      fontSize:'20px', fontFamily:'Arial,sans-serif', color:'#aaaaff'
+    }).setOrigin(0.5);
+    this.add.text(W/2, H/2+96, 'Collect apples to beat the BOSS at 1000!', {
+      fontSize:'18px', fontFamily:'Arial,sans-serif', color:'#ff9944'
+    }).setOrigin(0.5);
+    const startText = this.add.text(W/2, H/2+138, 'PRESS SPACE TO PLAY', {
+      fontSize:'28px', fontFamily:'Arial Black,sans-serif', color:'#FFD700'
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: startText, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
+
+    // ── SHOP | QUESTS | LEVELS | CRAFTER buttons ──
+    const mkBtn = (x, y, w, label, bg, border, fg, scene, key) => {
+      const b = this.add.rectangle(x, y, w, 42, bg, 1).setStrokeStyle(2, border).setInteractive({ useHandCursor: true });
+      const t = this.add.text(x, y, label, { fontSize:'18px', fontFamily:'Arial Black,sans-serif', color: '#'+fg.toString(16).padStart(6,'0'), stroke:'#000', strokeThickness:3 }).setOrigin(0.5);
+      b.on('pointerover', () => { b.setAlpha(0.7); }); b.on('pointerout', () => { b.setAlpha(1); });
+      b.on('pointerdown', () => this.scene.start(scene));
+      this.input.keyboard.on('keydown-'+key, () => this.scene.start(scene));
+    };
+    mkBtn(W/2-228, H/2+185, 140, 'SHOP',    0x003366, 0x00FFFF, 0x00FFFF, 'ShopScene',  'S');
+    mkBtn(W/2-76,  H/2+185, 140, 'QUESTS',  0x1a2200, 0xaaff00, 0xaaff00, 'QuestScene', 'Q');
+    mkBtn(W/2+76,  H/2+185, 140, 'LEVELS',  0x1a0033, 0xdd88ff, 0xdd88ff, 'LevelScene', 'L');
+    mkBtn(W/2+228, H/2+185, 140, 'CRAFTER', 0x001a0a, 0x00ff88, 0x00ff88, 'CraftScene', 'C');
+
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+
+    // Login streak display
+    const streak = getLoginStreak();
+    const sColor = streak >= 7 ? '#ffdd00' : streak >= 3 ? '#ffaa44' : '#88aacc';
+    const sMsg   = streak >= 7 ? 'Day ' + streak + ' streak - you are on fire!'
+                 : streak >= 3 ? 'Day ' + streak + ' streak - keep it up!'
+                 : streak === 1 ? 'Day 1 - welcome back!'
+                 : 'Day ' + streak + ' streak!';
+    this.add.text(W/2, H/2 + 232, sMsg, {
+      fontSize:'14px', fontFamily:'Arial,sans-serif', color: sColor
+    }).setOrigin(0.5);
+  }
+  update(time, delta) { tickPlasma(this, delta); }
+}
+
+// ── GAME SCENE ────────────────────────────────────────────────────────────────
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+  init(data) {
+    this.shipType = (data && data.ship !== undefined) ? data.ship : selectedShipIndex;
+    markShipUsed(this.shipType);
+  }
+
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+    this.W = W; this.H = H;
+
+    // Level-based background + themed starfield
+    const curLevel = getCurrentLevelData().level;
+    const starPalette = drawLevelBackground(this, curLevel);
+    this.stars = [];
+    for (let i = 0; i < 150; i++) {
+      const speed = Phaser.Math.FloatBetween(1, 4);
+      const col   = Phaser.Math.RND.pick(starPalette);
+      this.stars.push({
+        x: Phaser.Math.Between(0, W), y: Phaser.Math.Between(0, H), speed,
+        gfx: this.add.circle(0, 0, speed < 2 ? 1 : 2, col)
+      });
+    }
+    const pAlpha = [0.30,0.22,0.18,0.22,0.32,0.28,0.22,0.25,0.30,0.35][curLevel-1] || 0.3;
+    initPlasma(this, pAlpha);
+    drawSans(this, 490, 330, 1.8, 0.1, 0);
+
+    // Groups
+    this.obstacles = this.physics.add.group();
+    this.powerups  = this.physics.add.group();
+    this.lasers    = this.physics.add.group();
+    this.aliens    = this.physics.add.group();
+    this.coinGroup = this.physics.add.group();
+    this.knives    = this.physics.add.group();
+
+    // Player
+    this.player = this.physics.add.image(120, H/2, '__DEFAULT');
+    this.player.setVisible(false).setSize(56, 36);
+    this.player.body.setAllowGravity(false);
+    this.shipGfx = this.add.graphics();
+    this.drawShip(120, H/2);
+
+    // HUD
+    this.score = 0;
+    this.scoreTxt = this.add.text(16, 16, 'SCORE: 0', {
+      fontSize:'24px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#000', strokeThickness:4
+    }).setDepth(10);
+    this.livesLeft = 3;
+    this.coinHud = this.add.text(16, 50, 'COINS: ' + getCoinCount(), {
+      fontSize:'18px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#000', strokeThickness:3
+    }).setDepth(10);
+    this.livesTxt = this.add.text(W-16, 16, '♥ ♥ ♥', {
+      fontSize:'24px', fontFamily:'Arial,sans-serif',
+      color:'#ff4444', stroke:'#000', strokeThickness:3
+    }).setOrigin(1,0).setDepth(10);
+
+    // Controls
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.wasd    = this.input.keyboard.addKeys({ up:'W', down:'S' });
+
+    // State
+    this.spawnTimer   = 0;
+    this.spawnInterval= 1400;
+    this.gameSpeed    = 280;
+    this.appleTimer   = 0;
+    this.appleInterval= 5000;
+    this.coinTimer    = 0;
+    this.coinInterval = 3500;
+    this.invincible      = false;
+    this.gameOver        = false;
+    this.bossInProgress  = false;
+    this.lastBossScore   = 0;
+    this.currentFoodBoss = null;
+    this.bossActive      = false;
+    this.bossBobTime  = 0;
+    this.bossHP       = 0;
+    this.boss         = null;
+    this.bossGfx      = null;
+    this.bossBarGfx   = null;
+    this.bossNameTxt  = null;
+    this.laserTimer      = null;
+    this.alienTimer      = null;
+    this.knifeTimer      = null;
+    this.wallPhase       = false;
+    this.applesCollected = 0;
+    this.showerActive    = false;
+    this.shower400done   = false;
+    this.shower750done   = false;
+
+    // Overlaps
+    this.physics.add.overlap(this.player, this.obstacles, this.hitObstacle,  null, this);
+    this.physics.add.overlap(this.player, this.powerups,  this.collectApple, null, this);
+    this.physics.add.overlap(this.player, this.lasers,    this.hitLaser,     null, this);
+    this.physics.add.overlap(this.player, this.aliens,    this.hitAlien,     null, this);
+    this.physics.add.overlap(this.player, this.coinGroup, this.collectCoin,  null, this);
+    this.physics.add.overlap(this.player, this.knives,    this.hitKnife,     null, this);
+
+    // Score ticker — also triggers boss
+    this.time.addEvent({
+      delay: 100, loop: true,
+      callback: () => {
+        if (this.gameOver) return;
+        this.score++;
+        this.scoreTxt.setText('SCORE: ' + this.score);
+        if (this.score >= 500)  questDone('score500');
+        if (this.score >= 1000) questDone('score1000');
+        const bossMilestone = Math.floor(this.score / 1000);
+        if (bossMilestone > this.lastBossScore && !this.bossInProgress) this.triggerBoss();
+        // Asteroid showers between bosses
+        if (this.score === 400 && !this.shower400done) { this.shower400done = true; this.triggerAsteroidShower(); }
+        if (this.score === 750 && !this.shower750done) { this.shower750done = true; this.triggerAsteroidShower(); }
+        // no score cap — game goes on forever
+      }
+    });
+
+    // Speed ramp (paused during boss)
+    this.time.addEvent({
+      delay: 5000, loop: true,
+      callback: () => {
+        if (!this.bossInProgress && this.gameSpeed < 580) {
+          this.gameSpeed    += 30;
+          this.spawnInterval = Math.max(700, this.spawnInterval - 80);
+        }
+      }
+    });
+
+    // Big asteroid — spawns every 7s outside boss/wall phases
+    this.time.addEvent({
+      delay: 7000, loop: true,
+      callback: () => {
+        if (!this.bossInProgress && !this.gameOver && !this.wallPhase && !this.showerActive)
+          this.spawnBigAsteroid();
+      }
+    });
+  }
+
+  // ── Drawing helpers ──────────────────────────────────────────────────────────
+
+  drawShip(x, y) {
+    this.shipGfx.clear();
+    SHIPS[this.shipType || 0].draw(this.shipGfx, x, y, 1);
+  }
+
+  drawBossGraphic() {
+    this.bossGfx.clear();
+    if (this.currentFoodBoss) this.currentFoodBoss.draw(this.bossGfx);
+  }
+
+  // ── Spawners ─────────────────────────────────────────────────────────────────
+
+  spawnObstacle() {
+    const type = Math.random() < 0.5 ? 0 : Phaser.Math.Between(1, 2);
+    const y = Phaser.Math.Between(50, this.H-50);
+    const x = this.W + 60;
+    const obj = this.obstacles.create(x, y, '__DEFAULT');
+    obj.setVisible(false);
+    const g = this.add.graphics();
+    obj.gfx = g;
+    if (type === 0) {
+      obj.setSize(38, 38);
+      obj.isAsteroid = true;
+      const col = Phaser.Math.RND.pick([0xcc4400, 0xaa3300, 0x884422]);
+      g.fillStyle(col);          g.fillCircle(0, 0, 19);
+      g.fillStyle(0x662200, 0.5); g.fillCircle(-5,-5, 8);
+      g.fillStyle(0xffaa55, 0.4); g.fillCircle( 4, 4, 5);
+    } else if (type === 1) {
+      // Zombie
+      obj.setSize(30, 48);
+      g.fillStyle(0x4a7c4a); g.fillRoundedRect(-12,-2,24,22,4);
+      g.fillStyle(0x6abf6a); g.fillCircle(0,-16,14);
+      g.fillStyle(0xff0000); g.fillCircle(-5,-18,4); g.fillCircle(5,-18,4);
+      g.fillStyle(0x000000); g.fillCircle(-5,-18,2); g.fillCircle(5,-18,2);
+      g.fillStyle(0x1a3d1a); g.fillRect(-6,-9,12,4);
+      g.fillStyle(0xeeeeee); g.fillRect(-5,-9,3,3); g.fillRect(-1,-9,3,3); g.fillRect(3,-9,3,3);
+      g.fillStyle(0x6abf6a); g.fillRoundedRect(-22,4,10,6,3); g.fillRoundedRect(12,4,10,6,3);
+      g.fillStyle(0x2d4d2d); g.fillRect(-10,20,8,12); g.fillRect(2,20,8,12);
+    } else {
+      // Meteor cluster
+      obj.setSize(28, 56);
+      g.fillStyle(0x886633);
+      g.fillCircle( 0,-18,14); g.fillCircle(-6, 4,12); g.fillCircle(6,18,10);
+    }
+    g.x = x; g.y = y;
+    obj.body.setVelocityX(-this.gameSpeed);
+    obj.body.setAllowGravity(false);
+  }
+
+  spawnApple() {
+    const y = Phaser.Math.Between(50, this.H-50);
+    const x = this.W + 40;
+    const apple = this.powerups.create(x, y, '__DEFAULT');
+    apple.setVisible(false).setSize(28, 30);
+    apple.body.setAllowGravity(false);
+    apple.body.setVelocityX(this.bossActive ? -220 : -this.gameSpeed);
+    const g = this.add.graphics();
+    apple.gfx = g;
+    g.fillStyle(0xff2222); g.fillCircle(0, 4, 14);
+    g.fillStyle(0xff8888, 0.7); g.fillCircle(-4,-2, 5);
+    g.fillStyle(0x663300); g.fillRect(-1,-14, 3, 9);
+    g.fillStyle(0x33bb33); g.fillEllipse(5,-12,12,7);
+    g.x = x; g.y = y;
+  }
+
+  spawnAlien() {
+    if (!this.bossActive || this.gameOver) return;
+    const y = Phaser.Math.Between(60, this.H - 60);
+    const x = this.W + 60;
+    const alien = this.aliens.create(x, y, '__DEFAULT');
+    alien.setVisible(false).setSize(38, 32);
+    alien.body.setAllowGravity(false);
+    alien.body.setVelocityX(-this.gameSpeed * 0.85);
+    alien.baseY      = y;
+    alien.wavePhase  = Phaser.Math.FloatBetween(0, Math.PI * 2);
+    alien.waveSpeed  = Phaser.Math.FloatBetween(1.8, 3.2);
+
+    const g = this.add.graphics().setDepth(6);
+    // Saucer body
+    g.fillStyle(0xaaddff);
+    g.fillEllipse(0, 8, 60, 20);
+    g.fillStyle(0x88bbee);
+    g.fillEllipse(0, 8, 44, 12);
+    // Dome
+    g.fillStyle(0x66ff99);
+    g.fillEllipse(0, -6, 38, 30);
+    g.fillStyle(0x33cc66, 0.5);
+    g.fillEllipse(-6, -10, 14, 12);
+    // Alien head inside dome
+    g.fillStyle(0x22bb55);
+    g.fillCircle(0, -4, 13);
+    // Big alien eyes
+    g.fillStyle(0x000000);
+    g.fillEllipse(-6, -7, 9, 11);
+    g.fillEllipse( 6, -7, 9, 11);
+    g.fillStyle(0xff4444);
+    g.fillCircle(-6, -7, 3);
+    g.fillCircle( 6, -7, 3);
+    // Antennae
+    g.fillStyle(0x22bb55);
+    g.fillRect(-8, -18, 3, 8);
+    g.fillRect( 5, -18, 3, 8);
+    g.fillStyle(0xffff00);
+    g.fillCircle(-7, -20, 4);
+    g.fillCircle( 7, -20, 4);
+    // Engine glow
+    g.fillStyle(0x00ffff, 0.7);
+    g.fillCircle(-16, 12, 5);
+    g.fillCircle(  0, 14, 5);
+    g.fillCircle( 16, 12, 5);
+
+    g.x = x; g.y = y;
+    alien.gfx = g;
+  }
+
+  spawnCoin() {
+    const y = Phaser.Math.Between(40, this.H - 40);
+    const coin = this.coinGroup.create(this.W + 30, y, '__DEFAULT');
+    coin.setVisible(false).setSize(22, 22);
+    coin.body.setAllowGravity(false);
+    coin.body.setVelocityX(-this.gameSpeed * 0.8);
+    const g = this.add.graphics().setDepth(5);
+    g.fillStyle(0xFFD700); g.fillCircle(0, 0, 11);
+    g.fillStyle(0xcc8800); g.fillCircle(0, 0, 11); g.fillStyle(0xFFD700); g.fillCircle(0, 0, 9);
+    g.fillStyle(0xffee88); g.fillCircle(-3, -3, 5);
+    g.lineStyle(2, 0xcc8800); g.strokeCircle(0, 0, 10);
+    g.fillStyle(0xcc8800); g.fillRect(-1, -6, 2, 12); g.fillRect(-4, -3, 8, 2); g.fillRect(-4, 1, 8, 2);
+    g.x = this.W + 30; g.y = y;
+    coin.gfx = g;
+  }
+
+  collectCoin(player, coin) {
+    if (!coin.active) return;
+    if (coin.gfx) coin.gfx.destroy();
+    coin.destroy();
+    addCoins(1);
+    this.coinHud.setText('COINS: ' + getCoinCount());
+    const pop = this.add.text(player.x, player.y - 26, '+1 COIN!', {
+      fontSize:'17px', fontFamily:'Arial Black', color:'#FFD700', stroke:'#000', strokeThickness:3
+    }).setDepth(20);
+    this.tweens.add({ targets: pop, y: pop.y - 40, alpha: 0, duration: 700, onComplete: () => pop.destroy() });
+  }
+
+  throwKnife() {
+    if (!this.bossActive || this.gameOver || !this.boss || !this.boss.active) return;
+    // Aim slightly toward player
+    const bx = this.boss.x, by = this.boss.y;
+    const angle = Phaser.Math.Angle.Between(bx, by, this.player.x, this.player.y);
+    const speed = 420 + this.lastBossScore * 20;
+    const vx = Math.cos(angle) * speed;
+    const vy = Math.sin(angle) * speed;
+
+    const knife = this.knives.create(bx - 30, by + Phaser.Math.Between(-40, 40), '__DEFAULT');
+    knife.setVisible(false).setSize(36, 10);
+    knife.body.setAllowGravity(false);
+    knife.body.setVelocity(vx, vy);
+    knife.angle = Phaser.Math.RadToDeg(angle); // store for spin
+
+    const g = this.add.graphics().setDepth(7);
+    // Blade
+    g.fillStyle(0xddeeff); g.fillTriangle(-18, -4, 12, -4, 18, 0);
+    g.fillTriangle(-18, 4, 12, 4, 18, 0);
+    // Blade edge highlight
+    g.fillStyle(0xffffff); g.fillTriangle(-10, -2, 14, -2, 18, 0);
+    // Spine
+    g.fillStyle(0xaabbcc); g.fillRect(-18, -1, 30, 2);
+    // Handle
+    g.fillStyle(0x6b3a1f); g.fillRoundedRect(-18, -5, 14, 10, 2);
+    // Handle wrap
+    g.fillStyle(0x8b5a2b); g.fillRect(-16, -5, 3, 10); g.fillRect(-10, -5, 3, 10);
+    // Pommel
+    g.fillStyle(0x888888); g.fillCircle(-18, 0, 5);
+
+    g.x = bx - 30; g.y = by + Phaser.Math.Between(-40, 40);
+    knife.gfx = g;
+    knife.spinAngle = Phaser.Math.RadToDeg(angle);
+    knife.vx = vx; knife.vy = vy;
+  }
+
+  hitKnife(player, knife) {
+    if (this.invincible || this.gameOver) return;
+    if (!knife.active) return;
+    if (knife.gfx) knife.gfx.destroy();
+    knife.destroy();
+    this.takeDamage(1);
+  }
+
+  // ── Collision handlers ────────────────────────────────────────────────────────
+
+  collectApple(player, apple) {
+    if (!apple.active) return;
+    if (apple.gfx) apple.gfx.destroy();
+    apple.destroy();
+
+    if (this.bossActive) {
+      this.damageBoss();
+      const pop = this.add.text(player.x, player.y-30, 'HIT!', {
+        fontSize:'26px', fontFamily:'Arial Black', color:'#ffaa00',
+        stroke:'#000', strokeThickness:3
+      }).setDepth(20);
+      this.tweens.add({ targets: pop, y: pop.y-55, alpha: 0, duration: 700,
+        onComplete: () => pop.destroy() });
+      return;
+    }
+
+    this.applesCollected++;
+    if (this.applesCollected >= 5) questDone('apples5');
+
+    let msg = '';
+    if (this.livesLeft < 3) { this.livesLeft++; msg = '+LIFE!'; }
+    else                    { this.score += 50; msg = '+50!'; }
+    const hearts = ['','♥','♥ ♥','♥ ♥ ♥'];
+    this.livesTxt.setText(hearts[this.livesLeft] || '');
+    this.cameras.main.flash(200, 0, 255, 0);
+    const pop = this.add.text(player.x, player.y-30, msg, {
+      fontSize:'22px', fontFamily:'Arial Black', color:'#00ff88',
+      stroke:'#000', strokeThickness:3
+    }).setDepth(20);
+    this.tweens.add({ targets: pop, y: pop.y-50, alpha: 0, duration: 800,
+      onComplete: () => pop.destroy() });
+  }
+
+  hitObstacle(player, obs) {
+    if (this.invincible || this.gameOver) return;
+
+    // Drill nose drills through asteroids only
+    if (obs.isAsteroid && getCraftCfg().nose === 2) {
+      if (obs.gfx) obs.gfx.destroy();
+      if (obs.isBigAsteroid) {
+        // Big asteroid splits into 2 smaller ones
+        this.spawnSplitAsteroid(obs.x, obs.y - 22);
+        this.spawnSplitAsteroid(obs.x, obs.y + 22);
+      }
+      obs.destroy();
+      this.cameras.main.shake(80, 0.009);
+      return;
+    }
+
+    this.takeDamage();
+  }
+
+  hitLaser(player, laser) {
+    if (this.invincible || this.gameOver) return;
+    this.takeDamage(1);
+  }
+
+  hitAlien(player, alien) {
+    if (this.invincible || this.gameOver) return;
+    if (alien.gfx) alien.gfx.destroy();
+    alien.destroy();
+    const warn = this.add.text(player.x, player.y - 36, '-2 LIVES!', {
+      fontSize:'28px', fontFamily:'Arial Black', color:'#ff2222',
+      stroke:'#000', strokeThickness:4
+    }).setDepth(20);
+    this.tweens.add({ targets: warn, y: warn.y - 60, alpha: 0, duration: 900,
+      onComplete: () => warn.destroy() });
+    this.takeDamage(2);
+  }
+
+  takeDamage(amount) {
+    this.livesLeft -= (amount || 1);
+    const hearts = ['','♥','♥ ♥','♥ ♥ ♥'];
+    this.livesTxt.setText(hearts[this.livesLeft] || '');
+    this.cameras.main.flash(200, 255, 0, 0);
+    if (this.livesLeft <= 0) { this.endGame(); return; }
+    this.invincible = true;
+    this.time.delayedCall(1500, () => { this.invincible = false; });
+  }
+
+  endGame() {
+    this.gameOver = true;
+    addXP(Math.floor(this.score / 10));
+    this.scene.start('GameOverScene', { score: this.score, win: false });
+  }
+
+  winGame() {
+    if (this.gameOver) return;
+    this.gameOver = true;
+    questDone('winGame');
+    addXP(Math.floor(this.score / 10) + 50);
+    this.scene.start('GameOverScene', { score: this.score, win: true });
+  }
+
+  // ── Boss fight ────────────────────────────────────────────────────────────────
+
+  triggerBoss() {
+    this.bossInProgress = true;
+    this.lastBossScore  = Math.floor(this.score / 1000);
+    this.currentFoodBoss = FOOD_BOSSES[Phaser.Math.Between(0, FOOD_BOSSES.length - 1)];
+
+    // Clear the screen
+    this.obstacles.getChildren().slice().forEach(o => { if(o.gfx) o.gfx.destroy(); o.destroy(); });
+    this.powerups.getChildren().slice().forEach(a => { if(a.gfx) a.gfx.destroy(); a.destroy(); });
+
+    this.cameras.main.shake(200, 0.012);
+    this.sansJumpscare();
+  }
+
+  sansJumpscare() {
+    // Dark overlay slams in
+    const overlay = this.add.rectangle(this.W/2, this.H/2, this.W, this.H, 0x000000, 0).setDepth(25);
+    this.tweens.add({ targets: overlay, alpha: 0.9, duration: 80 });
+
+    // Big Sans pops in from tiny → full size
+    const sg = drawSans(this, this.W/2, 260, 2.2, 1, 26);
+    sg.setScale(0.05);
+    this.tweens.add({
+      targets: sg, scaleX: 1, scaleY: 1, duration: 130, ease: 'Back.Out',
+      onComplete: () => this.cameras.main.shake(500, 0.025)
+    });
+
+    // "you're gonna have a bad time"
+    const quote = this.add.text(this.W/2, 520, "you're gonna have a bad time", {
+      fontSize: '30px', fontFamily: 'Arial Black', color: '#ffffff',
+      stroke: '#000000', strokeThickness: 5
+    }).setOrigin(0.5).setAlpha(0).setDepth(27);
+    this.time.delayedCall(180, () => {
+      this.tweens.add({ targets: quote, alpha: 1, duration: 150 });
+    });
+
+    // Glowing blue eye pulse on the Sans graphic
+    this.tweens.add({
+      targets: sg, alpha: 0.6, duration: 200, yoyo: true, repeat: 3, delay: 300
+    });
+
+    // Fade everything out, then spawn boss
+    this.time.delayedCall(2400, () => {
+      this.tweens.add({
+        targets: [overlay, sg, quote], alpha: 0, duration: 350,
+        onComplete: () => { overlay.destroy(); sg.destroy(); quote.destroy(); this.spawnBoss(); }
+      });
+    });
+  }
+
+  spawnBoss() {
+    this.bossActive  = true;
+    this.bossBobTime = 0;
+    this.bossBaseY   = this.H / 2;
+    this.bossHP      = Math.min(5 + (this.lastBossScore - 1) * 2, 15);
+    this.bossMaxHP   = this.bossHP;
+
+    // Boss physics body (invisible hitbox)
+    this.boss = this.physics.add.image(690, this.H/2, '__DEFAULT');
+    this.boss.setVisible(false).setSize(70, 100);
+    this.boss.body.setAllowGravity(false);
+    this.boss.body.setImmovable(true);
+
+    // Boss graphic (drawn at origin, repositioned each frame)
+    this.bossGfx = this.add.graphics().setDepth(5);
+    this.drawBossGraphic();
+    this.bossGfx.x = 690;
+    this.bossGfx.y = this.H / 2;
+
+    // Health bar
+    this.bossBarGfx  = this.add.graphics().setDepth(11);
+    this.bossNameTxt = this.add.text(this.W/2, 36, this.currentFoodBoss.name, {
+      fontSize:'15px', fontFamily:'Arial Black', color:'#ff5555',
+      stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5).setDepth(12);
+    this.updateBossBar();
+
+    // Hint
+    const hint = this.add.text(this.W/2, this.H/2 + 110, 'Collect APPLES to beat the boss!', {
+      fontSize:'22px', fontFamily:'Arial Black', color:'#ffcc00',
+      stroke:'#000', strokeThickness:4
+    }).setOrigin(0.5).setDepth(20);
+    this.time.delayedCall(3000, () => {
+      this.tweens.add({ targets: hint, alpha: 0, duration: 800, onComplete: () => hint.destroy() });
+    });
+
+    // Laser timer
+    this.laserTimer = this.time.addEvent({
+      delay: 1800, loop: true,
+      callback: this.fireLaser, callbackScope: this
+    });
+
+    // Alien spawn timer
+    this.alienTimer = this.time.addEvent({
+      delay: 2200, loop: true,
+      callback: this.spawnAlien, callbackScope: this
+    });
+
+    // Knife throw timer
+    this.knifeTimer = this.time.addEvent({
+      delay: 1200, loop: true,
+      callback: this.throwKnife, callbackScope: this
+    });
+  }
+
+  updateBossBar() {
+    if (!this.bossBarGfx) return;
+    this.bossBarGfx.clear();
+    const bW=300, bH=22, bx=this.W/2-150, by=48;
+    this.bossBarGfx.fillStyle(0x222222);
+    this.bossBarGfx.fillRect(bx, by, bW, bH);
+    const fill = (this.bossHP / this.bossMaxHP) * bW;
+    this.bossBarGfx.fillStyle(0xff2200);
+    this.bossBarGfx.fillRect(bx, by, fill, bH);
+    this.bossBarGfx.lineStyle(2, 0xffffff);
+    this.bossBarGfx.strokeRect(bx, by, bW, bH);
+  }
+
+  damageBoss() {
+    this.bossHP--;
+    this.updateBossBar();
+    this.tweens.add({ targets: this.bossGfx, alpha: 0.1, duration: 80, yoyo: true, repeat: 2 });
+    this.cameras.main.shake(120, 0.01);
+    if (this.bossHP <= 0) this.killBoss();
+  }
+
+  fireLaser() {
+    if (!this.bossActive || this.gameOver || !this.boss || !this.boss.active) return;
+
+    // Pick 1 or 2 laser rows
+    const count = Phaser.Math.Between(1, 2);
+    for (let i = 0; i < count; i++) {
+      const offset = count === 2 ? (i === 0 ? -55 : 55) : 0;
+      const laserY = Phaser.Math.Clamp(
+        this.boss.y + Phaser.Math.Between(-80, 80) + offset, 40, this.H-40
+      );
+      this.fireSingleLaser(laserY);
+    }
+  }
+
+  fireSingleLaser(laserY) {
+    // Warning flash on right edge
+    const warn = this.add.graphics().setDepth(15);
+    warn.fillStyle(0xff0000);   warn.fillRect(630, laserY-13, 150, 26);
+    warn.fillStyle(0xffff00);   warn.fillRect(640, laserY-7,  130, 14);
+    this.tweens.add({ targets: warn, alpha: 0.1, duration: 140, yoyo: true, repeat: 3 });
+
+    // Fire beam after warning
+    this.time.delayedCall(640, () => {
+      if (!this.bossActive || this.gameOver) { warn.destroy(); return; }
+      warn.destroy();
+
+      // Full-width laser beam as physics body
+      const beam = this.lasers.create(400, laserY, '__DEFAULT');
+      beam.setVisible(false).setSize(800, 22);
+      beam.body.setAllowGravity(false);
+      beam.body.setImmovable(true);
+
+      // Laser graphic
+      const lg = this.add.graphics().setDepth(14);
+      lg.fillStyle(0xff0000, 0.95); lg.fillRect(-400,-11, 800, 22);
+      lg.fillStyle(0xff6600, 0.85); lg.fillRect(-400, -7, 800, 14);
+      lg.fillStyle(0xffffff, 0.65); lg.fillRect(-400, -3, 800,  6);
+      lg.x = 400; lg.y = laserY;
+      beam.gfx = lg;
+
+      // Destroy after 380ms
+      this.time.delayedCall(380, () => {
+        if (lg    && lg.scene)   lg.destroy();
+        if (beam  && beam.active){ beam.gfx = null; beam.destroy(); }
+      });
+    });
+  }
+
+  killBoss() {
+    this.bossActive     = false;
+    this.bossInProgress = false;
+    if (this.laserTimer) this.laserTimer.remove();
+    if (this.alienTimer) this.alienTimer.remove();
+    if (this.knifeTimer) this.knifeTimer.remove();
+
+    // Destroy remaining lasers
+    this.lasers.getChildren().slice().forEach(l => {
+      if (l.gfx) l.gfx.destroy();
+      if (l.active) l.destroy();
+    });
+
+    // Destroy remaining aliens
+    this.aliens.getChildren().slice().forEach(a => {
+      if (a.gfx) a.gfx.destroy();
+      if (a.active) a.destroy();
+    });
+
+    // Destroy remaining knives
+    this.knives.getChildren().slice().forEach(k => {
+      if (k.gfx) k.gfx.destroy();
+      if (k.active) k.destroy();
+    });
+
+    // Big explosion
+    this.cameras.main.shake(500, 0.025);
+    for (let i = 0; i < 24; i++) {
+      const ex = this.boss.x + Phaser.Math.Between(-80, 80);
+      const ey = this.boss.y + Phaser.Math.Between(-90, 90);
+      const c  = this.add.circle(ex, ey, Phaser.Math.Between(8,30),
+        Phaser.Math.RND.pick([0xff6600, 0xffaa00, 0xff2200, 0xffff00])).setDepth(8);
+      this.tweens.add({
+        targets: c, scaleX: 0.1, scaleY: 0.1, alpha: 0,
+        duration: Phaser.Math.Between(400, 1100),
+        onComplete: () => c.destroy()
+      });
+    }
+
+    // Clean up boss objects
+    if (this.bossGfx)    { this.bossGfx.destroy();    this.bossGfx    = null; }
+    if (this.boss)       { this.boss.destroy();        this.boss       = null; }
+    if (this.bossBarGfx) { this.bossBarGfx.destroy();  this.bossBarGfx = null; }
+    if (this.bossNameTxt){ this.bossNameTxt.destroy();  this.bossNameTxt= null; }
+
+    questDone('beatBoss');
+    addXP(30);
+
+    // Bonus
+    this.score += 500;
+    this.scoreTxt.setText('SCORE: ' + this.score);
+
+    const vic = this.add.text(this.W/2, this.H/2, 'BOSS DEFEATED!\n+500 POINTS!', {
+      fontSize:'46px', fontFamily:'Arial Black', color:'#FFD700',
+      stroke:'#000', strokeThickness:7, align:'center'
+    }).setOrigin(0.5).setDepth(20);
+    this.tweens.add({ targets: vic, scaleX:1.1, scaleY:1.1, duration:280, yoyo:true, repeat:3 });
+
+    this.time.delayedCall(2600, () => {
+      vic.destroy();
+      this.gameSpeed    = Math.max(this.gameSpeed, 440);
+      this.spawnInterval= 820;
+      this.startAsteroidWalls();
+    });
+  }
+
+  // ── Asteroid walls ────────────────────────────────────────────────────────────
+
+  startAsteroidWalls() {
+    this.wallPhase = true;
+
+    const warn = this.add.text(this.W/2, this.H/2, 'ASTEROID FIELD!', {
+      fontSize:'52px', fontFamily:'Arial Black', color:'#ff8800',
+      stroke:'#000', strokeThickness:8
+    }).setOrigin(0.5).setDepth(20);
+    this.tweens.add({ targets: warn, scaleX:1.1, scaleY:1.1, duration:250, yoyo:true, repeat:3,
+      onComplete: () => { this.tweens.add({ targets: warn, alpha:0, duration:600, onComplete: () => warn.destroy() }); }
+    });
+
+    const wallCount = 7;
+    let spawned = 0;
+    this.time.addEvent({
+      delay: 2000,
+      repeat: wallCount - 1,
+      callback: () => {
+        spawned++;
+        const gapSize = 140;
+        const gapY = Phaser.Math.Between(70, this.H - 70 - gapSize);
+        this.spawnAsteroidWall(gapY, gapSize);
+
+        if (spawned >= wallCount) {
+          // Wait for last wall to clear, then resume normal game
+          this.time.delayedCall(4500, () => {
+            this.wallPhase = false;
+          });
+        }
+      }
+    });
+  }
+
+  spawnBigAsteroid(x, y) {
+    const px = x || this.W + 80;
+    const py = y || Phaser.Math.Between(60, this.H - 60);
+    const obj = this.obstacles.create(px, py, '__DEFAULT');
+    obj.setVisible(false).setSize(56, 56);
+    obj.isAsteroid    = true;
+    obj.isBigAsteroid = true;
+    obj.body.setAllowGravity(false);
+    obj.body.setVelocityX(-this.gameSpeed * 0.72);
+    const g = this.add.graphics();
+    const col = Phaser.Math.RND.pick([0xcc4400, 0xaa3300, 0x994422, 0xbb5500]);
+    g.fillStyle(col);           g.fillCircle(0, 0, 28);
+    g.fillStyle(0x662200, 0.5); g.fillCircle(-9,-9, 14);
+    g.fillStyle(0x442200, 0.4); g.fillCircle(11, 8, 9);
+    g.fillStyle(0xffaa55, 0.3); g.fillCircle(4,-12, 7);
+    g.fillStyle(0x331100, 0.35);g.fillCircle(-5,13, 5);
+    g.lineStyle(2, 0x552200, 0.6); g.strokeCircle(0, 0, 28);
+    g.x = px; g.y = py;
+    obj.gfx = g;
+  }
+
+  spawnSplitAsteroid(x, y) {
+    const obj = this.obstacles.create(x, y, '__DEFAULT');
+    obj.setVisible(false).setSize(22, 22);
+    obj.isAsteroid = true;
+    obj.body.setAllowGravity(false);
+    obj.body.setVelocity(-this.gameSpeed * 0.9, Phaser.Math.Between(-130, 130));
+    const col = Phaser.Math.RND.pick([0xcc4400, 0xaa3300, 0x884422]);
+    const g = this.add.graphics();
+    g.fillStyle(col);           g.fillCircle(0, 0, 11);
+    g.fillStyle(0x662200, 0.5); g.fillCircle(-3,-3, 5);
+    g.x = x; g.y = y;
+    obj.gfx = g;
+  }
+
+  triggerAsteroidShower() {
+    if (this.showerActive || this.bossInProgress) return;
+    this.showerActive = true;
+
+    const txt = this.add.text(this.W / 2, 75, '☄ ASTEROID SHOWER! ☄', {
+      fontSize:'32px', fontFamily:'Arial Black,sans-serif',
+      color:'#ff6600', stroke:'#000', strokeThickness:5
+    }).setOrigin(0.5).setDepth(20);
+    this.tweens.add({ targets: txt, alpha: 0, delay: 1400, duration: 500,
+      onComplete: () => txt.destroy() });
+
+    let count = 0;
+    const ev = this.time.addEvent({
+      delay: 280, loop: true,
+      callback: () => {
+        if (this.gameOver || count >= 18) { ev.remove(); this.showerActive = false; return; }
+        this.spawnBigAsteroid();
+        // Also spawn a regular asteroid every other wave
+        if (count % 2 === 0) {
+          const y = Phaser.Math.Between(50, this.H - 50);
+          const obj = this.obstacles.create(this.W + 60, y, '__DEFAULT');
+          obj.setVisible(false).setSize(38, 38);
+          obj.isAsteroid = true;
+          obj.body.setAllowGravity(false);
+          obj.body.setVelocityX(-this.gameSpeed);
+          const g = this.add.graphics();
+          const col = Phaser.Math.RND.pick([0xcc4400, 0xaa3300, 0x884422]);
+          g.fillStyle(col); g.fillCircle(0, 0, 19);
+          g.fillStyle(0x662200, 0.5); g.fillCircle(-5,-5, 8);
+          g.fillStyle(0xffaa55, 0.4); g.fillCircle(4, 4, 5);
+          g.x = this.W + 60; g.y = y;
+          obj.gfx = g;
+        }
+        count++;
+      }
+    });
+  }
+
+  spawnAsteroidWall(gapY, gapSize) {
+    const x = this.W + 50;
+    const spacing = 36;
+
+    // Top section: from top to gap
+    for (let ay = 18; ay < gapY - 14; ay += spacing) {
+      this.spawnWallAsteroid(x, ay);
+    }
+    // Bottom section: from gap end to bottom
+    for (let ay = gapY + gapSize; ay < this.H - 18; ay += spacing) {
+      this.spawnWallAsteroid(x, ay);
+    }
+  }
+
+  spawnWallAsteroid(x, y) {
+    const obj = this.obstacles.create(x, y, '__DEFAULT');
+    obj.setVisible(false).setSize(28, 28);
+    obj.isAsteroid = true;
+    obj.body.setAllowGravity(false);
+    obj.body.setVelocityX(-this.gameSpeed);
+
+    const g = this.add.graphics();
+    const col = Phaser.Math.RND.pick([0xcc4400, 0xaa3300, 0x884422, 0x996633, 0xbb5511]);
+    g.fillStyle(col);        g.fillCircle(0, 0, 14);
+    g.fillStyle(0x662200, 0.5); g.fillCircle(-4, -4, 6);
+    g.fillStyle(0x442200, 0.4); g.fillCircle( 5,  3, 4);
+    g.fillStyle(0xffaa55, 0.3); g.fillCircle(-2, -6, 3);
+    g.x = x; g.y = y;
+    obj.gfx = g;
+  }
+
+  // ── Main update ───────────────────────────────────────────────────────────────
+
+  update(time, delta) {
+    tickPlasma(this, delta);
+    if (this.gameOver) return;
+
+    // Player movement
+    let vy = 0;
+    if (this.cursors.up.isDown   || this.wasd.up.isDown)   vy = -260;
+    if (this.cursors.down.isDown || this.wasd.down.isDown)  vy =  260;
+    this.player.setVelocityY(vy);
+    this.player.y = Phaser.Math.Clamp(this.player.y, 28, this.H-28);
+    this.drawShip(this.player.x, this.player.y);
+
+    // Invincibility flicker
+    this.shipGfx.alpha = (this.invincible && Math.sin(time/80) < 0) ? 0.2 : 1;
+
+    // Spawn obstacles (not during boss or wall phase)
+    if (!this.bossInProgress && !this.wallPhase) {
+      this.spawnTimer += delta;
+      if (this.spawnTimer >= this.spawnInterval) {
+        this.spawnTimer = 0;
+        this.spawnObstacle();
+      }
+    }
+
+    // Apples: always spawn except during active wall phase (walls are tight enough already)
+    if (!this.wallPhase) {
+      this.appleTimer += delta;
+      if (this.appleTimer >= (this.bossActive ? 2600 : this.appleInterval)) {
+        this.appleTimer = 0;
+        this.spawnApple();
+      }
+    }
+
+    // Coins: spawn throughout the game
+    this.coinTimer += delta;
+    if (this.coinTimer >= this.coinInterval) {
+      this.coinTimer = 0;
+      this.spawnCoin();
+    }
+
+    // Boss bob
+    if (this.bossActive && this.boss && this.boss.active) {
+      this.bossBobTime += delta;
+      this.boss.y = this.bossBaseY + Math.sin(this.bossBobTime / 500) * 90;
+      this.bossGfx.x = this.boss.x;
+      this.bossGfx.y = this.boss.y;
+    }
+
+    // Sync & clean obstacles
+    this.obstacles.getChildren().slice().forEach(obs => {
+      if (obs.gfx) { obs.gfx.x = obs.x; obs.gfx.y = obs.y; }
+      if (obs.x < -100) { if (obs.gfx) obs.gfx.destroy(); obs.destroy(); }
+    });
+
+    // Sync & clean apples
+    this.powerups.getChildren().slice().forEach(a => {
+      if (a.gfx) { a.gfx.x = a.x; a.gfx.y = a.y; }
+      if (a.x < -100) { if (a.gfx) a.gfx.destroy(); a.destroy(); }
+    });
+
+    // Aliens: sine wave bob + sync + clean
+    this.aliens.getChildren().slice().forEach(alien => {
+      const newY = alien.baseY + Math.sin(this.time.now * 0.001 * alien.waveSpeed + alien.wavePhase) * 70;
+      alien.body.reset(alien.x, newY);
+      if (alien.gfx) { alien.gfx.x = alien.x; alien.gfx.y = alien.y; }
+      if (alien.x < -100) { if (alien.gfx) alien.gfx.destroy(); alien.destroy(); }
+    });
+
+    // Sync & clean coins
+    this.coinGroup.getChildren().slice().forEach(c => {
+      if (c.gfx) { c.gfx.x = c.x; c.gfx.y = c.y; }
+      if (c.x < -100) { if (c.gfx) c.gfx.destroy(); c.destroy(); }
+    });
+
+    // Spin & clean knives
+    this.knives.getChildren().slice().forEach(k => {
+      if (k.gfx) {
+        k.gfx.x = k.x; k.gfx.y = k.y;
+        k.spinAngle = (k.spinAngle || 0) + delta * 0.6;
+        k.gfx.setAngle(k.spinAngle);
+      }
+      if (k.x < -100 || k.x > this.W + 100 || k.y < -100 || k.y > this.H + 100) {
+        if (k.gfx) k.gfx.destroy(); k.destroy();
+      }
+    });
+  }
+}
+
+// ── GAME OVER / WIN SCENE ─────────────────────────────────────────────────────
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  init(data) { this.finalScore = data.score || 0; this.win = data.win || false; }
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+
+    // Stars
+    for (let i = 0; i < 120; i++) {
+      this.add.circle(Phaser.Math.Between(0,W), Phaser.Math.Between(0,H),
+        Phaser.Math.Between(1,2), 0xffffff, Phaser.Math.FloatBetween(0.2,0.9));
+    }
+
+    initPlasma(this, 1);
+    drawSans(this, 590, 370, 1.5, 0.58);
+
+    if (this.win) {
+      // ── YOU WIN ──
+      // Firework bursts
+      for (let i = 0; i < 30; i++) {
+        const c = this.add.circle(
+          Phaser.Math.Between(50, W-50), Phaser.Math.Between(50, H-50),
+          Phaser.Math.Between(4, 16),
+          Phaser.Math.RND.pick([0xFFD700, 0xff6600, 0x00ffff, 0xff44ff, 0x44ff88])
+        );
+        this.tweens.add({ targets: c, alpha: 0, scaleX: 0.1, scaleY: 0.1,
+          duration: Phaser.Math.Between(800, 2000), delay: Phaser.Math.Between(0, 1200),
+          repeat: -1, yoyo: false });
+      }
+      this.add.text(W/2, H/2-130, 'YOU WIN!!!', {
+        fontSize:'72px', fontFamily:'Arial Black,sans-serif',
+        color:'#FFD700', stroke:'#000', strokeThickness:9
+      }).setOrigin(0.5);
+      this.add.text(W/2, H/2-50, 'You survived the boss AND the asteroid field!', {
+        fontSize:'20px', fontFamily:'Arial,sans-serif', color:'#aaffaa'
+      }).setOrigin(0.5);
+      this.add.text(W/2, H/2+20, String(this.finalScore), {
+        fontSize:'80px', fontFamily:'Arial Black,sans-serif',
+        color:'#FFD700', stroke:'#8B4513', strokeThickness:6
+      }).setOrigin(0.5);
+    } else {
+      // ── GAME OVER ──
+      this.add.text(W/2, H/2-130, 'GAME OVER', {
+        fontSize:'64px', fontFamily:'Arial Black,sans-serif',
+        color:'#ff4444', stroke:'#000', strokeThickness:8
+      }).setOrigin(0.5);
+      this.add.text(W/2, H/2-40, 'YOUR SCORE', {
+        fontSize:'28px', fontFamily:'Arial,sans-serif', color:'#aaaaff'
+      }).setOrigin(0.5);
+      this.add.text(W/2, H/2+20, String(this.finalScore), {
+        fontSize:'80px', fontFamily:'Arial Black,sans-serif',
+        color:'#FFD700', stroke:'#8B4513', strokeThickness:6
+      }).setOrigin(0.5);
+    }
+
+    const r = this.add.text(W/2, H/2+128, 'PRESS SPACE TO PLAY AGAIN', {
+      fontSize:'26px', fontFamily:'Arial Black,sans-serif', color:'#ffffff'
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: r, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('ShopScene'));
+
+    // HOME button
+    const homeBg = this.add.rectangle(W/2, H/2+178, 160, 44, 0x1a003a, 1)
+      .setStrokeStyle(3, 0xaa66ff).setInteractive({ useHandCursor: true });
+    const homeTxt = this.add.text(W/2, H/2+178, 'HOME', {
+      fontSize:'26px', fontFamily:'Arial Black,sans-serif', color:'#aa66ff',
+      stroke:'#000', strokeThickness:4
+    }).setOrigin(0.5);
+    homeBg.on('pointerover', () => { homeBg.setFillStyle(0x330066); homeTxt.setColor('#ffffff'); });
+    homeBg.on('pointerout',  () => { homeBg.setFillStyle(0x1a003a); homeTxt.setColor('#aa66ff'); });
+    homeBg.on('pointerdown', () => this.scene.start('TitleScene'));
+    this.input.keyboard.on('keydown-H', () => this.scene.start('TitleScene'));
+  }
+  update(time, delta) { tickPlasma(this, delta); }
+}
+
+// ── SHIP SHOP SCENE ───────────────────────────────────────────────────────────
+class ShopScene extends Phaser.Scene {
+  constructor() { super('ShopScene'); }
+
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+    initPlasma(this, 0.7);
+    for (let i = 0; i < 100; i++) {
+      this.add.circle(Phaser.Math.Between(0,W), Phaser.Math.Between(0,H),
+        Phaser.Math.Between(1,3), 0xffffff, Phaser.Math.FloatBetween(0.3,1));
+    }
+
+    // Title
+    this.add.text(W/2, 44, 'SHIP SHOP', {
+      fontSize:'52px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#000000', strokeThickness:7
+    }).setOrigin(0.5);
+
+    // Preview panel
+    const panel = this.add.rectangle(W/2, 268, 430, 268, 0x000022, 0.88);
+    panel.setStrokeStyle(3, 0xFFD700);
+
+    // Ship preview graphics
+    this.previewGfx = this.add.graphics();
+
+    // Nav arrows
+    const lArr = this.add.text(112, 268, '◄', {
+      fontSize:'52px', fontFamily:'Arial', color:'#FFD700', stroke:'#000', strokeThickness:4
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    lArr.on('pointerdown', () => this.navigate(-1));
+    lArr.on('pointerover', () => lArr.setAlpha(0.5));
+    lArr.on('pointerout',  () => lArr.setAlpha(1));
+
+    const rArr = this.add.text(688, 268, '►', {
+      fontSize:'52px', fontFamily:'Arial', color:'#FFD700', stroke:'#000', strokeThickness:4
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    rArr.on('pointerdown', () => this.navigate(1));
+    rArr.on('pointerover', () => rArr.setAlpha(0.5));
+    rArr.on('pointerout',  () => rArr.setAlpha(1));
+
+    // Counter
+    this.counterTxt = this.add.text(W/2, 416, '', {
+      fontSize:'18px', fontFamily:'Arial,sans-serif', color:'#888888'
+    }).setOrigin(0.5);
+
+    // Ship name
+    this.shipNameTxt = this.add.text(W/2, 448, '', {
+      fontSize:'34px', fontFamily:'Arial Black,sans-serif', stroke:'#000', strokeThickness:5
+    }).setOrigin(0.5);
+
+    // Description
+    this.shipDescTxt = this.add.text(W/2, 490, '', {
+      fontSize:'20px', fontFamily:'Arial,sans-serif', color:'#aaccff'
+    }).setOrigin(0.5);
+
+    // Play prompt
+    this.flyTxt = this.add.text(W/2, 544, 'PRESS SPACE TO FLY THIS SHIP!', {
+      fontSize:'24px', fontFamily:'Arial Black,sans-serif', color:'#ffffff',
+      stroke:'#000', strokeThickness:4
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: this.flyTxt, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
+
+    // Craft prompt (shown when MY SHIP not yet forged)
+    this.craftTxt = this.add.text(W/2, 544, 'PRESS SPACE TO GO TO CRAFTER!', {
+      fontSize:'22px', fontFamily:'Arial Black,sans-serif', color:'#00ff88',
+      stroke:'#000', strokeThickness:4
+    }).setOrigin(0.5).setVisible(false);
+    this.tweens.add({ targets: this.craftTxt, alpha: 0, duration: 600, yoyo: true, repeat: -1 });
+
+    // HOME button
+    const homeBg = this.add.rectangle(72, 44, 120, 38, 0x1a003a, 1)
+      .setStrokeStyle(2, 0xaa66ff).setInteractive({ useHandCursor: true });
+    const homeTxt = this.add.text(72, 44, 'HOME', {
+      fontSize:'22px', fontFamily:'Arial Black,sans-serif', color:'#aa66ff',
+      stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5);
+    homeBg.on('pointerover', () => { homeBg.setFillStyle(0x330066); homeTxt.setColor('#ffffff'); });
+    homeBg.on('pointerout',  () => { homeBg.setFillStyle(0x1a003a); homeTxt.setColor('#aa66ff'); });
+    homeBg.on('pointerdown', () => this.scene.start('TitleScene'));
+    this.input.keyboard.on('keydown-H', () => this.scene.start('TitleScene'));
+
+    // Keyboard nav
+    this.input.keyboard.on('keydown-LEFT',  () => this.navigate(-1));
+    this.input.keyboard.on('keydown-RIGHT', () => this.navigate(1));
+    this.input.keyboard.on('keydown-A',     () => this.navigate(-1));
+    this.input.keyboard.on('keydown-D',     () => this.navigate(1));
+    this.input.keyboard.on('keydown-SPACE', () => this.selectShip());
+
+    this.selected = selectedShipIndex;
+    this._gone = false;
+    this.drawPreview();
+  }
+
+  navigate(dir) {
+    this.selected = (this.selected + dir + SHIPS.length) % SHIPS.length;
+    selectedShipIndex = this.selected;
+    this.drawPreview();
+  }
+
+  selectShip() {
+    if (this._gone) return;
+    const ship = SHIPS[this.selected];
+    // MY SHIP (craft system)
+    if (ship.custom && !getCraftCfg().forged) {
+      this.scene.start('CraftScene');
+      return;
+    }
+    // Premium coin-locked ship
+    if (ship.cost > 0 && !getUnlockedShips().has(this.selected)) {
+      if (spendCoins(ship.cost)) {
+        unlockShip(this.selected);
+        this._gone = true;
+        selectedShipIndex = this.selected;
+        this.scene.start('GameScene', { ship: this.selected });
+      } else {
+        this.cameras.main.shake(180, 0.009);
+        this.craftTxt.setText('NOT ENOUGH COINS!').setColor('#ff2200');
+        this.time.delayedCall(900, () => this.drawPreview());
+      }
+      return;
+    }
+    this._gone = true;
+    selectedShipIndex = this.selected;
+    this.scene.start('GameScene', { ship: this.selected });
+  }
+
+  drawPreview() {
+    const ship = SHIPS[this.selected];
+    this.previewGfx.clear();
+    const isCustomLocked   = ship.custom && !getCraftCfg().forged;
+    const isPremiumLocked  = ship.cost > 0 && !getUnlockedShips().has(this.selected);
+    const canAffordPremium = ship.cost > 0 && getCoinCount() >= ship.cost;
+
+    // Always draw the ship (premium ships show as teaser even when locked)
+    ship.draw(this.previewGfx, this.scale.width / 2, 268, 2);
+
+    if (isCustomLocked) {
+      // Grey out with lock overlay
+      const g = this.previewGfx;
+      g.fillStyle(0x000000, 0.6); g.fillRect(295, 134, 430, 268);
+      g.fillStyle(0x334455); g.fillRoundedRect(this.scale.width/2 - 40, 240, 80, 60, 8);
+      g.lineStyle(3, 0x00aaff); g.strokeRoundedRect(this.scale.width/2 - 40, 240, 80, 60, 8);
+      g.fillStyle(0x0088cc); g.fillRect(this.scale.width/2 - 12, 258, 24, 28);
+      g.lineStyle(4, 0x00aaff); g.strokeCircle(this.scale.width/2, 261, 14);
+    } else if (isPremiumLocked) {
+      // Semi-dark with gold price overlay
+      const g = this.previewGfx;
+      g.fillStyle(0x000000, 0.45); g.fillRect(295, 134, 430, 268);
+      g.fillStyle(0xcc8800); g.fillRoundedRect(this.scale.width/2 - 56, 244, 112, 44, 8);
+      g.fillStyle(0xFFD700); g.fillRoundedRect(this.scale.width/2 - 54, 246, 108, 40, 6);
+      g.fillStyle(0x553300); g.fillRect(this.scale.width/2 - 36, 255, 4, 14); // coin symbol
+      g.fillRect(this.scale.width/2 - 36, 255, 12, 4); g.fillRect(this.scale.width/2 - 36, 261, 12, 4);
+    }
+
+    this.counterTxt.setText((this.selected + 1) + ' / ' + SHIPS.length);
+
+    if (isCustomLocked) {
+      this.shipNameTxt.setText('MY SHIP [LOCKED]').setColor('#667788');
+      this.shipDescTxt.setText('Build it first in the CRAFTER!');
+      this.flyTxt.setVisible(false);
+      this.craftTxt.setText('PRESS SPACE TO GO TO CRAFTER!').setColor('#00ff88').setVisible(true);
+    } else if (isPremiumLocked) {
+      this.shipNameTxt.setText(ship.name + ' [100 COINS]').setColor('#FFD700');
+      this.shipDescTxt.setText(ship.desc);
+      this.flyTxt.setVisible(false);
+      const msg = canAffordPremium ? 'PRESS SPACE TO UNLOCK — 100 COINS!' : 'NEED 100 COINS TO UNLOCK!';
+      this.craftTxt.setText(msg).setColor(canAffordPremium ? '#FFD700' : '#ff4444').setVisible(true);
+    } else {
+      this.shipNameTxt.setText(ship.name).setColor(ship.color);
+      this.shipDescTxt.setText(ship.desc);
+      this.flyTxt.setVisible(true);
+      this.craftTxt.setVisible(false);
+    }
+  }
+
+  update(time, delta) { tickPlasma(this, delta); }
+}
+
+// ── QUEST SCENE ───────────────────────────────────────────────────────────────
+class QuestScene extends Phaser.Scene {
+  constructor() { super('QuestScene'); }
+
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+    initPlasma(this, 0.55);
+    for (let i = 0; i < 80; i++) {
+      this.add.circle(Phaser.Math.Between(0,W), Phaser.Math.Between(0,H),
+        Phaser.Math.Between(1,2), 0xffffff, Phaser.Math.FloatBetween(0.2,0.8));
+    }
+
+    // Title
+    this.add.text(W/2, 34, 'QUEST CHART', {
+      fontSize:'42px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#000', strokeThickness:7
+    }).setOrigin(0.5);
+
+    // Completion count
+    const doneCount = QUESTS.filter(q => isQuestDone(q.id)).length;
+    this.add.text(W/2, 70, doneCount + ' / ' + QUESTS.length + ' completed', {
+      fontSize:'16px', fontFamily:'Arial,sans-serif',
+      color: doneCount === QUESTS.length ? '#44ff44' : '#aaaacc'
+    }).setOrigin(0.5);
+
+    // Login streak banner
+    const streak    = getLoginStreak();
+    const sColor    = streak >= 7 ? 0xffdd00 : streak >= 3 ? 0xff9900 : 0x4488cc;
+    const sBorderC  = streak >= 7 ? 0xffdd00 : streak >= 3 ? 0xff9900 : 0x336688;
+    this.add.rectangle(W/2, 92, 700, 30, 0x0a0a22, 0.95).setStrokeStyle(2, sBorderC);
+    const flame = streak >= 7 ? ' - ON FIRE!' : streak >= 3 ? ' - keep it up!' : '';
+    this.add.text(W/2, 92,
+      'Login streak: Day ' + streak + flame + '   (opens the game to count)',
+      { fontSize:'13px', fontFamily:'Arial,sans-serif', color: '#' + sColor.toString(16).padStart(6,'0') }
+    ).setOrigin(0.5);
+
+    // Quest rows — 8 quests, 56px each
+    QUESTS.forEach((q, i) => {
+      const rowY = 108 + i * 57;
+      const done = isQuestDone(q.id);
+      const isStreak = !!q.streak;
+
+      // Row background
+      this.add.rectangle(W/2, rowY + 22, 700, 50,
+        done ? (isStreak ? 0x1a1100 : 0x002200) : 0x0a0a1e, 0.92)
+        .setStrokeStyle(2, done ? (isStreak ? 0xffaa00 : 0x44ff44) : 0x2a3a5a);
+
+      // Checkbox
+      this.add.rectangle(50, rowY + 22, 28, 28,
+        done ? (isStreak ? 0xaa7700 : 0x00aa00) : 0x1a1a33)
+        .setStrokeStyle(2, done ? (isStreak ? 0xffaa00 : 0x44ff44) : 0x445566);
+      if (done) {
+        this.add.text(50, rowY + 22, 'V', {
+          fontSize:'17px', fontFamily:'Arial Black', color:'#ffffff'
+        }).setOrigin(0.5);
+      }
+
+      // Quest name
+      this.add.text(76, rowY + 9, q.label, {
+        fontSize:'17px', fontFamily:'Arial Black,sans-serif',
+        color: done ? (isStreak ? '#ffcc44' : '#44ff44') : '#ffffff'
+      });
+
+      // Description / streak progress
+      const descTxt = isStreak && !done
+        ? q.desc + '  (Day ' + streak + ' / ' + q.streak + ')'
+        : q.desc;
+      this.add.text(76, rowY + 30, descTxt, {
+        fontSize:'12px', fontFamily:'Arial,sans-serif',
+        color: done ? (isStreak ? '#ccaa55' : '#77cc77') : '#7788aa'
+      });
+
+      // Badge on right
+      if (done) {
+        this.add.text(W - 28, rowY + 22, 'DONE!', {
+          fontSize:'14px', fontFamily:'Arial Black',
+          color: isStreak ? '#ffcc44' : '#44ff44', stroke:'#000', strokeThickness:3
+        }).setOrigin(1, 0.5);
+      }
+    });
+
+    // HOME button
+    const homeBg = this.add.rectangle(W/2, 578, 160, 40, 0x1a003a, 1)
+      .setStrokeStyle(2, 0xaa66ff).setInteractive({ useHandCursor: true });
+    const homeTxt = this.add.text(W/2, 578, 'HOME', {
+      fontSize:'20px', fontFamily:'Arial Black,sans-serif', color:'#aa66ff',
+      stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5);
+    homeBg.on('pointerover', () => { homeBg.setFillStyle(0x330066); homeTxt.setColor('#ffffff'); });
+    homeBg.on('pointerout',  () => { homeBg.setFillStyle(0x1a003a); homeTxt.setColor('#aa66ff'); });
+    homeBg.on('pointerdown', () => this.scene.start('TitleScene'));
+    this.input.keyboard.on('keydown-H',      () => this.scene.start('TitleScene'));
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('TitleScene'));
+  }
+
+  update(time, delta) { tickPlasma(this, delta); }
+}
+
+// ── LEVEL SCENE ───────────────────────────────────────────────────────────────
+class LevelScene extends Phaser.Scene {
+  constructor() { super('LevelScene'); }
+
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+    initPlasma(this, 0.55);
+    for (let i = 0; i < 80; i++) {
+      this.add.circle(Phaser.Math.Between(0,W), Phaser.Math.Between(0,H),
+        Phaser.Math.Between(1,2), 0xffffff, Phaser.Math.FloatBetween(0.2,0.8));
+    }
+
+    // Title
+    this.add.text(W/2, 34, 'LEVEL CHART', {
+      fontSize:'42px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#000', strokeThickness:7
+    }).setOrigin(0.5);
+
+    const xp  = getTotalXP();
+    const cur = getCurrentLevelData();
+    const nxt = getNextLevelData();
+
+    // XP total
+    this.add.text(W/2, 72, 'Total XP: ' + xp, {
+      fontSize:'16px', fontFamily:'Arial,sans-serif', color:'#aaccff'
+    }).setOrigin(0.5);
+
+    // Current level card
+    this.add.rectangle(W/2, 126, 700, 80, 0x001133, 0.95).setStrokeStyle(3, 0x00ccff);
+    this.add.rectangle(70, 126, 68, 68, 0x003366).setStrokeStyle(2, 0x00ccff);
+    this.add.text(70, 126, String(cur.level), {
+      fontSize:'34px', fontFamily:'Arial Black', color:'#FFD700', stroke:'#000', strokeThickness:4
+    }).setOrigin(0.5);
+    this.add.text(120, 109, cur.name, {
+      fontSize:'22px', fontFamily:'Arial Black,sans-serif', color:'#00ccff', stroke:'#000', strokeThickness:3
+    });
+    this.add.text(120, 136, cur.level < 10 ? 'You are here!' : 'MAX LEVEL - you won!', {
+      fontSize:'13px', fontFamily:'Arial,sans-serif', color:'#668899'
+    });
+
+    // XP progress bar (right side of card)
+    if (nxt) {
+      const bx = 390, by = 126, bw = 260, bh = 18;
+      const pct  = Math.min((xp - cur.xp) / (nxt.xp - cur.xp), 1);
+      this.add.text(bx, by - 17, 'Progress to Level ' + nxt.level + ' (' + nxt.name + ')', {
+        fontSize:'12px', fontFamily:'Arial,sans-serif', color:'#5588aa'
+      }).setOrigin(0.5);
+      this.add.rectangle(bx, by, bw, bh, 0x001a33).setStrokeStyle(1, 0x224466);
+      if (pct > 0) {
+        this.add.rectangle(bx - bw/2 + (pct*bw)/2, by, pct * bw, bh, 0x0088ff);
+      }
+      this.add.text(bx, by + 16, (xp - cur.xp) + ' / ' + (nxt.xp - cur.xp) + ' XP', {
+        fontSize:'12px', fontFamily:'Arial,sans-serif', color:'#3366aa'
+      }).setOrigin(0.5);
+    } else {
+      this.add.text(390, 126, 'CHAMPION! MAX LEVEL!', {
+        fontSize:'20px', fontFamily:'Arial Black', color:'#FFD700', stroke:'#000', strokeThickness:4
+      }).setOrigin(0.5);
+    }
+
+    // Column headers
+    this.add.text(34, 178, 'LV',   { fontSize:'12px', fontFamily:'Arial Black', color:'#445566' });
+    this.add.text(78, 178, 'RANK', { fontSize:'12px', fontFamily:'Arial Black', color:'#445566' });
+    this.add.text(W-30, 178, 'XP NEEDED', { fontSize:'12px', fontFamily:'Arial Black', color:'#445566' }).setOrigin(1,0);
+    this.add.rectangle(W/2, 188, 700, 1, 0x223344);
+
+    // Level rows (10 levels × 37px = 370px, ending at ~563)
+    LEVELS.forEach((lv, i) => {
+      const ry    = 196 + i * 37;
+      const isCur = lv.level === cur.level;
+      const done  = lv.level < cur.level;
+      this.add.rectangle(W/2, ry+14, 700, 34,
+        isCur ? 0x001a33 : done ? 0x001100 : 0x080818, 0.9)
+        .setStrokeStyle(1, isCur ? 0x00ccff : done ? 0x226622 : 0x151528);
+
+      // Level number
+      this.add.text(36, ry+5, String(lv.level), {
+        fontSize:'16px', fontFamily:'Arial Black',
+        color: isCur ? '#FFD700' : done ? '#44bb44' : '#334455'
+      });
+
+      // Status icon
+      if (done)  this.add.text(60, ry+4, '*', { fontSize:'17px', fontFamily:'Arial Black', color:'#44bb44' });
+      if (isCur) this.add.text(60, ry+5, '>', { fontSize:'15px', fontFamily:'Arial Black', color:'#00ccff' });
+
+      // Name
+      this.add.text(80, ry+5, lv.name, {
+        fontSize:'15px', fontFamily: isCur ? 'Arial Black,sans-serif' : 'Arial,sans-serif',
+        color: isCur ? '#00ccff' : done ? '#44bb44' : '#334455'
+      });
+
+      // XP requirement
+      this.add.text(W-30, ry+14, lv.xp + ' XP', {
+        fontSize:'13px', fontFamily:'Arial,sans-serif',
+        color: done ? '#224422' : isCur ? '#004466' : '#1a2230'
+      }).setOrigin(1, 0.5);
+    });
+
+    // HOME button
+    const homeBg = this.add.rectangle(W/2, 578, 160, 40, 0x1a003a, 1)
+      .setStrokeStyle(2, 0xaa66ff).setInteractive({ useHandCursor: true });
+    const homeTxt = this.add.text(W/2, 578, 'HOME', {
+      fontSize:'20px', fontFamily:'Arial Black,sans-serif', color:'#aa66ff',
+      stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5);
+    homeBg.on('pointerover', () => { homeBg.setFillStyle(0x330066); homeTxt.setColor('#ffffff'); });
+    homeBg.on('pointerout',  () => { homeBg.setFillStyle(0x1a003a); homeTxt.setColor('#aa66ff'); });
+    homeBg.on('pointerdown', () => this.scene.start('TitleScene'));
+    this.input.keyboard.on('keydown-H',       () => this.scene.start('TitleScene'));
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('TitleScene'));
+  }
+
+  update(time, delta) { tickPlasma(this, delta); }
+}
+
+// ── CRAFT SCENE ───────────────────────────────────────────────────────────────
+class CraftScene extends Phaser.Scene {
+  constructor() { super('CraftScene'); }
+
+  create() {
+    const W = this.scale.width, H = this.scale.height;
+    initPlasma(this, 0.5);
+    for (let i = 0; i < 80; i++) {
+      this.add.circle(Phaser.Math.Between(0,W), Phaser.Math.Between(0,H),
+        Phaser.Math.Between(1,2), 0xffffff, Phaser.Math.FloatBetween(0.2,0.9));
+    }
+
+    // Title
+    this.add.text(W/2, 38, 'SHIP CRAFTER', {
+      fontSize:'46px', fontFamily:'Arial Black,sans-serif',
+      color:'#00ff88', stroke:'#003322', strokeThickness:7
+    }).setOrigin(0.5);
+
+    // Coin display
+    this.coinTxt = this.add.text(W-14, 12, 'COINS: ' + getCoinCount(), {
+      fontSize:'20px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#000', strokeThickness:3
+    }).setOrigin(1, 0).setDepth(5);
+
+    // HOME button
+    const homeBg = this.add.rectangle(68, 44, 112, 36, 0x001a00, 1)
+      .setStrokeStyle(2, 0x00cc44).setInteractive({ useHandCursor: true });
+    const homeTxt = this.add.text(68, 44, 'HOME', {
+      fontSize:'20px', fontFamily:'Arial Black,sans-serif',
+      color:'#00cc44', stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5);
+    homeBg.on('pointerover', () => { homeBg.setFillStyle(0x003300); homeTxt.setColor('#00ff88'); });
+    homeBg.on('pointerout',  () => { homeBg.setFillStyle(0x001a00); homeTxt.setColor('#00cc44'); });
+    homeBg.on('pointerdown', () => this.scene.start('TitleScene'));
+    this.input.keyboard.on('keydown-H', () => this.scene.start('TitleScene'));
+
+    // Preview panel (left)
+    this.add.rectangle(190, 282, 288, 296, 0x000d1a, 0.92).setStrokeStyle(2, 0x00ff88);
+    this.previewGfx = this.add.graphics();
+    this.add.text(190, 412, 'PREVIEW', {
+      fontSize:'13px', fontFamily:'Arial,sans-serif', color:'#336644'
+    }).setOrigin(0.5);
+    this.costTxt = this.add.text(190, 432, '', {
+      fontSize:'13px', fontFamily:'Arial,sans-serif', color:'#ffcc44'
+    }).setOrigin(0.5);
+
+    // Parts panel (right)
+    this.add.rectangle(572, 282, 302, 296, 0x000a05, 0.92).setStrokeStyle(2, 0x00aaff);
+
+    // Tabs
+    const tabKeys   = ['body','wings','nose','engine','color'];
+    const tabLabels = ['BODY','WINGS','NOSE','ENGINE','COLOR'];
+    this._tabBtns = {};
+    tabKeys.forEach((tk, i) => {
+      const tx = 425 + i * 58;
+      const tbg = this.add.rectangle(tx, 148, 52, 26, 0x001122, 1)
+        .setStrokeStyle(1, 0x004488).setInteractive({ useHandCursor: true });
+      const ttx = this.add.text(tx, 148, tabLabels[i], {
+        fontSize:'10px', fontFamily:'Arial Black,sans-serif', color:'#4488cc'
+      }).setOrigin(0.5);
+      tbg.on('pointerdown', () => this.setTab(tk));
+      this._tabBtns[tk] = { bg: tbg, txt: ttx };
+    });
+
+    // Option list area (filled by setTab)
+    this._optObjs = [];
+
+    // Forge button
+    this.forgeBtn = this.add.rectangle(W/2, 533, 270, 44, 0x001400, 1)
+      .setStrokeStyle(2, 0x00ff44).setInteractive({ useHandCursor: true });
+    this.forgeTxt = this.add.text(W/2, 533, 'FORGE SHIP', {
+      fontSize:'22px', fontFamily:'Arial Black,sans-serif',
+      color:'#00ff44', stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5);
+    this.forgeBtn.on('pointerover', () => this.forgeBtn.setFillStyle(0x002800));
+    this.forgeBtn.on('pointerout',  () => this.forgeBtn.setFillStyle(0x001400));
+    this.forgeBtn.on('pointerdown', () => this.forgeShip());
+
+    // Load config and show first tab
+    this.craftCfg = getCraftCfg();
+    this.activeTab = 'body';
+    this.setTab('body');
+    this.updatePreview();
+  }
+
+  setTab(tab) {
+    this.activeTab = tab;
+    // Highlight active tab button
+    const tabKeys = ['body','wings','nose','engine','color'];
+    tabKeys.forEach(tk => {
+      const active = tk === tab;
+      this._tabBtns[tk].bg.setFillStyle(active ? 0x003355 : 0x001122)
+        .setStrokeStyle(1, active ? 0x00aaff : 0x004488);
+      this._tabBtns[tk].txt.setColor(active ? '#00ccff' : '#4488cc');
+    });
+
+    // Clear old option objects
+    this._optObjs.forEach(o => o.destroy());
+    this._optObjs = [];
+
+    // Build option rows
+    const parts = CRAFT_PARTS[tab];
+    const coins = getCoinCount();
+    parts.forEach((part, idx) => {
+      const y = 173 + idx * 38;
+      const sel = (this.craftCfg[tab] || 0) === idx;
+      const canAfford = coins >= part.cost;
+
+      const bg = this.add.rectangle(572, y, 278, 32, sel ? 0x003322 : 0x000d1a, 1)
+        .setStrokeStyle(1, sel ? 0x00ff88 : 0x224433)
+        .setInteractive({ useHandCursor: true });
+      const nt = this.add.text(437, y, (sel ? '► ' : '  ') + part.name, {
+        fontSize:'15px', fontFamily:'Arial Black,sans-serif',
+        color: sel ? '#00ff88' : (canAfford ? '#aaccaa' : '#445544')
+      }).setOrigin(0, 0.5);
+      const costStr = part.cost === 0 ? 'FREE' : part.cost + ' coins';
+      const ct = this.add.text(710, y, costStr, {
+        fontSize:'13px', fontFamily:'Arial,sans-serif',
+        color: part.cost === 0 ? '#44ff88' : (canAfford ? '#ffcc44' : '#664422')
+      }).setOrigin(1, 0.5);
+
+      bg.on('pointerdown', () => {
+        this.craftCfg[tab] = idx;
+        this.setTab(tab);
+        this.updatePreview();
+      });
+
+      this._optObjs.push(bg, nt, ct);
+    });
+
+    this.updatePreview();
+  }
+
+  updatePreview() {
+    saveCraftCfg(this.craftCfg);
+    this.previewGfx.clear();
+    drawShipCustom(this.previewGfx, 190, 275, 2);
+
+    let total = 0;
+    ['body','wings','nose','engine','color'].forEach(tk => {
+      total += (CRAFT_PARTS[tk][(this.craftCfg[tk]||0)] || {cost:0}).cost;
+    });
+    const coins = getCoinCount();
+    const ok = coins >= total;
+    const costStr = total === 0 ? 'FREE' : total + ' coins';
+    this.costTxt.setText('Cost: ' + costStr + '  |  Yours: ' + coins);
+    this.forgeTxt.setText('FORGE SHIP' + (total > 0 ? '  —  ' + total + ' coins' : '  —  FREE'));
+    this.forgeTxt.setColor(ok ? '#00ff44' : '#ff4444');
+    this.coinTxt.setText('COINS: ' + coins);
+  }
+
+  forgeShip() {
+    let total = 0;
+    ['body','wings','nose','engine','color'].forEach(tk => {
+      total += (CRAFT_PARTS[tk][(this.craftCfg[tk]||0)] || {cost:0}).cost;
+    });
+    if (!spendCoins(total)) {
+      this.cameras.main.shake(150, 0.01);
+      this.forgeTxt.setText('NOT ENOUGH COINS!').setColor('#ff2200');
+      this.time.delayedCall(900, () => this.updatePreview());
+      return;
+    }
+    this.craftCfg.forged = true;
+    saveCraftCfg(this.craftCfg);
+    this.cameras.main.flash(400, 0, 255, 100);
+    this.forgeTxt.setText('SHIP FORGED!').setColor('#FFD700');
+    this.coinTxt.setText('COINS: ' + getCoinCount());
+    this.time.delayedCall(1400, () => this.scene.start('ShopScene'));
+  }
+
+  update(time, delta) { tickPlasma(this, delta); }
+}
+
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const config = {
+  type: Phaser.AUTO,
+  width: 800, height: 600,
+  backgroundColor: '#05050f',
+  physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+  scene: [TitleScene, ShopScene, GameScene, GameOverScene, QuestScene, LevelScene, CraftScene]
+};
+const game = new Phaser.Game(config);
+</script>
+</body>
+</html>

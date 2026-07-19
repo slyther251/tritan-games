@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Minecraft Soccer</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+
+const W = 800, H = 600;
+const GND = 520;       // top of dirt
+const SURF = GND - 18; // top of grass (player stands here)
+const GOAL_X = 748;    // goal line x
+const GOAL_TOP = 368;  // top of goal opening
+const BALL_R = 18;     // ball visual + hitbox radius
+
+// ── COIN SYNC (earns coins in UFO Fighter) ────────────────────────────────────
+function addCoins(n) {
+  try {
+    const c = parseInt(localStorage.getItem('ufo_coins')||'0')||0;
+    localStorage.setItem('ufo_coins', String(c+n));
+  } catch(e) {}
+}
+function getCoins() {
+  try { return parseInt(localStorage.getItem('ufo_coins')||'0')||0; } catch(e){ return 0; }
+}
+
+// ── DRAW HELPERS ──────────────────────────────────────────────────────────────
+
+// Enderman — cx,cy = center of 22×52 physics body
+function drawEnderman(g, cx, cy, vx=0, walkPhase=0, inAir=false) {
+  const moving = !inAir && Math.abs(vx) > 20;
+  const swing  = moving ? Math.sin(walkPhase) * 10 : 0;
+  const DARK   = 0x111122;
+  const LIMB   = 0x1a0a2e;
+  const EYE    = 0xff44ff;
+
+  // Head (blocky cube)
+  g.fillStyle(DARK);
+  g.fillRect(cx - 10, cy - 26, 20, 15);
+  // Glowing eyes
+  g.fillStyle(0x660066);
+  g.fillRect(cx - 8,  cy - 22, 6, 5);
+  g.fillRect(cx + 2,  cy - 22, 6, 5);
+  g.fillStyle(EYE);
+  g.fillRect(cx - 7,  cy - 22, 5, 4);
+  g.fillRect(cx + 3,  cy - 22, 5, 4);
+
+  // Body (thin)
+  g.fillStyle(DARK);
+  g.fillRect(cx - 4, cy - 11, 8, 16);
+
+  // Long arms (Enderman signature)
+  g.fillStyle(LIMB);
+  const lArmLen = 28 + (moving ?  swing * 0.4 : 0);
+  const rArmLen = 28 + (moving ? -swing * 0.4 : 0);
+  g.fillRect(cx - 7, cy - 10 + (inAir ? 5 : 0), 3, lArmLen);
+  g.fillRect(cx + 4, cy - 10 + (inAir ? 5 : 0), 3, rArmLen);
+
+  // Legs
+  g.fillStyle(DARK);
+  if (inAir) {
+    g.fillRect(cx - 4, cy + 5, 3, 18);
+    g.fillRect(cx + 1, cy + 5, 3, 18);
+  } else if (moving) {
+    const lLen = 12 + swing * 0.5, rLen = 12 - swing * 0.5;
+    g.fillRect(cx - 4, cy + 5, 3, lLen);
+    g.fillRect(cx - 6, cy + 5 + lLen, 6, 4); // left foot
+    g.fillRect(cx + 1, cy + 5, 3, rLen);
+    g.fillRect(cx - 1, cy + 5 + rLen, 6, 4); // right foot
+  } else {
+    g.fillRect(cx - 4, cy + 5, 3, 19);
+    g.fillRect(cx + 1, cy + 5, 3, 19);
+  }
+}
+
+// Creeper — cx,cy = center of 24×60 physics body
+function drawCreeper(g, cx, cy) {
+  const t = cy - 30;
+  // Head
+  g.fillStyle(0x36a517); g.fillRect(cx-14, t,     28, 22);
+  g.fillStyle(0x111111);
+  g.fillRect(cx-10, t+4,   7,  7); // left eye
+  g.fillRect(cx+3,  t+4,   7,  7); // right eye
+  g.fillRect(cx-3,  t+13,  6,  4); // nose top
+  g.fillRect(cx-10, t+17,  6,  5); // mouth left
+  g.fillRect(cx+4,  t+17,  6,  5); // mouth right
+  // Body
+  g.fillStyle(0x36a517); g.fillRect(cx-9, t+22, 18, 22);
+  // Legs
+  g.fillStyle(0x2e8a12);
+  g.fillRect(cx-9, t+44,  8, 16);
+  g.fillRect(cx+1, t+44,  8, 16);
+}
+
+// Soccer ball
+function drawBall(g, cx, cy, r) {
+  g.fillStyle(0xffffff); g.fillCircle(cx, cy, r);
+  g.fillStyle(0x111111); g.fillCircle(cx, cy, r*0.22);
+  for (let i=0; i<5; i++) {
+    const a = i/5*Math.PI*2 - Math.PI/2;
+    g.fillCircle(cx+Math.cos(a)*r*0.55, cy+Math.sin(a)*r*0.55, r*0.18);
+  }
+  g.fillStyle(0xffffff, 0.65); g.fillCircle(cx-r*0.28, cy-r*0.28, r*0.22);
+}
+
+// Minecraft grass field background
+function drawField(scene) {
+  const g = scene.add.graphics();
+  // Sky
+  g.fillStyle(0x87ceeb); g.fillRect(0, 0, W, H);
+  // Clouds
+  g.fillStyle(0xffffff, 0.82);
+  [[110,68,48],[290,50,38],[510,62,52],[690,54,42]].forEach(([x,y,r])=>{
+    g.fillCircle(x,y,r); g.fillCircle(x+r*0.9,y-r*0.3,r*0.7); g.fillCircle(x-r*0.6,y,r*0.65);
+  });
+  // Grass top layer (Minecraft green)
+  g.fillStyle(0x4a8c28); g.fillRect(0, GND-18, W, 18);
+  // Grass tufts
+  g.fillStyle(0x5aac38);
+  for (let x=6; x<W; x+=26) {
+    g.fillRect(x,    GND-24, 7, 6);
+    g.fillRect(x+9,  GND-28, 6, 10);
+    g.fillRect(x+17, GND-22, 7, 4);
+  }
+  // Center line
+  g.fillStyle(0x3a7a1e, 0.7); g.fillRect(W/2-2, GND-18, 4, 18);
+  // Dirt
+  g.fillStyle(0x8B5e3c); g.fillRect(0, GND, W, H-GND);
+  g.fillStyle(0x7a5030, 0.3);
+  for (let y=GND+14; y<H; y+=18) g.fillRect(0, y, W, 3);
+}
+
+// Goal posts + net
+function drawGoal(scene) {
+  const g = scene.add.graphics();
+  // Crossbar
+  g.fillStyle(0xffffff); g.fillRect(GOAL_X-36, GOAL_TOP-10, 46, 10);
+  // Right post
+  g.fillRect(GOAL_X+8, GOAL_TOP-10, 10, GND-GOAL_TOP+10);
+  // Net
+  g.fillStyle(0xffffff, 0.12); g.fillRect(GOAL_X-26, GOAL_TOP, 34, GND-GOAL_TOP);
+  g.fillStyle(0xffffff, 0.28);
+  for (let y=GOAL_TOP; y<GND; y+=20) g.fillRect(GOAL_X-26, y, 34, 1);
+  for (let x=GOAL_X-26; x<GOAL_X+8; x+=12) g.fillRect(x, GOAL_TOP, 1, GND-GOAL_TOP);
+}
+
+// ── TITLE SCENE ───────────────────────────────────────────────────────────────
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+  create() {
+    drawField(this);
+    drawGoal(this);
+
+    this.add.text(W/2, 112, 'MINECRAFT', {
+      fontSize:'74px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#3d2000', strokeThickness:10
+    }).setOrigin(0.5);
+    this.add.text(W/2, 196, 'SOCCER', {
+      fontSize:'74px', fontFamily:'Arial Black,sans-serif',
+      color:'#44ee44', stroke:'#003300', strokeThickness:10
+    }).setOrigin(0.5);
+
+    // Demo characters
+    const g = this.add.graphics();
+    drawEnderman(g, 260, 418);
+    drawBall(g, 360, 420, BALL_R);
+    drawCreeper(g, 480, 415);
+
+    this.add.text(W/2, 462, '← → to run    SPACE to jump', {
+      fontSize:'22px', fontFamily:'Arial,sans-serif', color:'#ffffff', stroke:'#000', strokeThickness:4
+    }).setOrigin(0.5);
+    this.add.text(W/2, 494, 'Run into the ball to kick it into the goal!', {
+      fontSize:'20px', fontFamily:'Arial,sans-serif', color:'#ffee44', stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5);
+    this.add.text(W/2, 522, 'Score as many goals as you can in 90 seconds!', {
+      fontSize:'18px', fontFamily:'Arial,sans-serif', color:'#88ffcc', stroke:'#000', strokeThickness:3
+    }).setOrigin(0.5);
+
+    const blink = this.add.text(W/2, 560, 'PRESS SPACE TO KICK OFF!', {
+      fontSize:'30px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#000', strokeThickness:6
+    }).setOrigin(0.5);
+    this.tweens.add({targets:blink, alpha:0, duration:550, yoyo:true, repeat:-1});
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+  }
+  update() {}
+}
+
+// ── GAME SCENE ────────────────────────────────────────────────────────────────
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+
+  create() {
+    this.score     = 0;
+    this.timeLeft  = 90;
+    this.kickCD    = 0;
+    this.ended     = false;
+    this.walkPhase = 0;
+
+    drawField(this);
+    drawGoal(this);
+
+    // Ground platform
+    const plat = this.physics.add.staticGroup();
+    const gnd = plat.create(W/2, SURF+10, '__DEFAULT');
+    gnd.setSize(W, 20).setVisible(false).refreshBody();
+
+    // Player (Steve)
+    this.player = this.physics.add.image(120, SURF-24, '__DEFAULT');
+    this.player.setSize(22, 52).setVisible(false);
+    this.player.body.setMaxVelocityY(900);
+    this.player.setCollideWorldBounds(true);
+    this.pGfx = this.add.graphics();
+
+    // Ball
+    this.ball = this.physics.add.image(W/2, SURF-BALL_R-1, '__DEFAULT');
+    this.ball.setSize(BALL_R*2, BALL_R*2).setVisible(false);
+    this.ball.setBounce(0.55);
+    this.ball.setDragX(160);
+    this.ball.setCollideWorldBounds(true);
+    this.bGfx = this.add.graphics();
+
+    // Keeper (Creeper)
+    this.keeper = this.physics.add.image(GOAL_X-8, GOAL_TOP+76, '__DEFAULT');
+    this.keeper.setSize(24, 60).setVisible(false);
+    this.keeper.body.setAllowGravity(false);
+    this.keeper.setImmovable(true);
+    this.kGfx = this.add.graphics();
+
+    // Colliders
+    this.physics.add.collider(this.player, plat);
+    this.physics.add.collider(this.ball,   plat);
+    this.physics.add.collider(this.ball,   this.keeper, this.onSave, null, this);
+    this.physics.add.overlap(this.player,  this.ball,   this.onKick, null, this);
+
+    // Controls
+    this.cursors  = this.input.keyboard.createCursorKeys();
+    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+    // HUD
+    this.scoreTxt = this.add.text(16, 14, 'GOALS: 0', {
+      fontSize:'28px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#000', strokeThickness:5
+    }).setDepth(10);
+    this.timeTxt = this.add.text(W/2, 14, 'TIME: 90', {
+      fontSize:'28px', fontFamily:'Arial Black,sans-serif',
+      color:'#ffffff', stroke:'#000', strokeThickness:5
+    }).setOrigin(0.5, 0).setDepth(10);
+    this.coinTxt = this.add.text(W-14, 14, 'UFO COINS: ' + getCoins(), {
+      fontSize:'18px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#000', strokeThickness:4
+    }).setOrigin(1, 0).setDepth(10);
+
+    // GOAL! flash
+    this.goalTxt = this.add.text(W/2, H/2-20, '', {
+      fontSize:'110px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#000', strokeThickness:14
+    }).setOrigin(0.5).setDepth(20).setAlpha(0);
+
+    // Countdown timer
+    this.time.addEvent({
+      delay: 1000, loop: true,
+      callback: () => {
+        if (this.ended) return;
+        this.timeLeft--;
+        this.timeTxt.setText('TIME: ' + this.timeLeft);
+        if (this.timeLeft <= 10) this.timeTxt.setColor('#ff4444');
+        if (this.timeLeft <= 0)  this.endGame();
+      }
+    });
+
+    this.redraw();
+  }
+
+  onKick(player, ball) {
+    if (this.kickCD > 0) return;
+    this.kickCD = 320;
+
+    const dir = player.x <= ball.x ? 1 : -1;
+    const vx  = dir * (560 + Math.abs(player.body.velocity.x) * 0.45);
+    const vy  = player.body.velocity.y < -80 ? -440 : -220;
+    ball.body.setVelocity(vx, vy);
+    this.cameras.main.shake(65, 0.005);
+  }
+
+  onSave(keeper, ball) {
+    if (ball.body.velocity.x > 0) {
+      ball.body.setVelocityX(-Math.abs(ball.body.velocity.x) * 0.8);
+    }
+    this.cameras.main.shake(50, 0.003);
+  }
+
+  checkGoal() {
+    const bx = this.ball.x, by = this.ball.y;
+    if (bx + BALL_R >= GOAL_X && by > GOAL_TOP && by < SURF) {
+      this.score++;
+      this.scoreTxt.setText('GOALS: ' + this.score);
+      addCoins(3);
+      this.coinTxt.setText('UFO COINS: ' + getCoins());
+      this.cameras.main.flash(320, 255, 215, 0);
+      this.cameras.main.shake(260, 0.014);
+      this.goalTxt.setText('GOAL!').setAlpha(1).setScale(1);
+      this.tweens.add({
+        targets: this.goalTxt, scaleX: 1.4, scaleY: 1.4, alpha: 0,
+        duration: 900, ease: 'Quad.Out',
+        onComplete: () => this.goalTxt.setScale(1)
+      });
+      this.resetBall();
+      this.kickCD = 500;
+    }
+    // Ball went off left or top/bottom world edge — reset
+    if (bx < 0 || by < -60 || by > H+60) this.resetBall();
+  }
+
+  resetBall() {
+    this.ball.setPosition(W/2, SURF-BALL_R-1);
+    this.ball.body.setVelocity(0, 0);
+  }
+
+  updateKeeper() {
+    const targetY = Phaser.Math.Clamp(this.ball.y, GOAL_TOP+30, SURF-30);
+    const diff    = targetY - this.keeper.y;
+    const spd     = Math.min(Math.abs(diff)*3, 200);
+    this.keeper.body.setVelocityY(Math.sign(diff)*spd);
+    this.keeper.y = Phaser.Math.Clamp(this.keeper.y, GOAL_TOP+30, SURF-30);
+  }
+
+  endGame() {
+    if (this.ended) return;
+    this.ended = true;
+    this.player.body.setVelocity(0,0);
+    this.ball.body.setVelocity(0,0);
+    this.time.delayedCall(700, () => this.scene.start('GameOverScene', {score:this.score}));
+  }
+
+  redraw() {
+    const inAir = !this.player.body.blocked.down;
+    this.pGfx.clear(); drawEnderman(this.pGfx, this.player.x, this.player.y, this.player.body.velocity.x, this.walkPhase, inAir);
+    this.bGfx.clear(); drawBall(this.bGfx,     this.ball.x,   this.ball.y, BALL_R);
+    this.kGfx.clear(); drawCreeper(this.kGfx,  this.keeper.x, this.keeper.y);
+  }
+
+  update(time, delta) {
+    if (this.ended) return;
+
+    if (this.kickCD > 0) this.kickCD -= delta;
+
+    // Advance walk animation
+    if (this.player.body.blocked.down && Math.abs(this.player.body.velocity.x) > 20) {
+      this.walkPhase += delta * 0.008;
+    }
+
+    // Player movement
+    let vx = 0;
+    if (this.cursors.left.isDown)  vx = -300;
+    if (this.cursors.right.isDown) vx =  300;
+    this.player.body.setVelocityX(vx);
+
+    // Jump
+    if ((this.cursors.up.isDown || Phaser.Input.Keyboard.JustDown(this.spaceKey)) && this.player.body.blocked.down) {
+      this.player.body.setVelocityY(-570);
+    }
+
+    // Stop player entering the goal
+    this.player.x = Phaser.Math.Clamp(this.player.x, 14, GOAL_X-45);
+
+    this.checkGoal();
+    this.updateKeeper();
+    this.redraw();
+  }
+}
+
+// ── GAME OVER SCENE ───────────────────────────────────────────────────────────
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  init(data) { this.finalScore = data.score || 0; }
+
+  create() {
+    drawField(this);
+    drawGoal(this);
+
+    this.add.text(W/2, 130, 'FULL TIME!', {
+      fontSize:'82px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#000', strokeThickness:12
+    }).setOrigin(0.5);
+
+    const rating = this.finalScore >= 7 ? 'WORLD CLASS! 🏆' :
+                   this.finalScore >= 5 ? 'HAT TRICK HERO!' :
+                   this.finalScore >= 3 ? 'GREAT GAME!' :
+                   this.finalScore >= 1 ? 'KEEP TRAINING!' : 'NICE TRY!';
+
+    this.add.text(W/2, 242, rating, {
+      fontSize:'42px', fontFamily:'Arial Black,sans-serif',
+      color: this.finalScore >= 5 ? '#FFD700' : '#ffffff',
+      stroke:'#000', strokeThickness:7
+    }).setOrigin(0.5);
+
+    this.add.text(W/2, 320, 'GOALS: ' + this.finalScore, {
+      fontSize:'60px', fontFamily:'Arial Black,sans-serif',
+      color:'#44ff44', stroke:'#000', strokeThickness:9
+    }).setOrigin(0.5);
+
+    const earned = this.finalScore * 3;
+    if (earned > 0) {
+      this.add.text(W/2, 396, '+' + earned + ' UFO Fighter coins earned!', {
+        fontSize:'22px', fontFamily:'Arial,sans-serif',
+        color:'#FFD700', stroke:'#000', strokeThickness:4
+      }).setOrigin(0.5);
+    }
+
+    // Characters
+    const g = this.add.graphics();
+    drawEnderman(g, W/2 - 60, 480);
+    if (this.finalScore > 0) drawBall(g, W/2 + 14, 492, BALL_R);
+    if (this.finalScore >= 3) drawCreeper(g, W/2 + 90, 477);
+
+    const blink = this.add.text(W/2, 545, 'PRESS SPACE TO PLAY AGAIN', {
+      fontSize:'28px', fontFamily:'Arial Black,sans-serif',
+      color:'#FFD700', stroke:'#000', strokeThickness:6
+    }).setOrigin(0.5);
+    this.tweens.add({targets:blink, alpha:0, duration:500, yoyo:true, repeat:-1});
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+  }
+  update() {}
+}
+
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const config = {
+  type: Phaser.AUTO,
+  width: W, height: H,
+  backgroundColor: '#87ceeb',
+  physics: {
+    default: 'arcade',
+    arcade: { gravity: { y: 700 }, debug: false }
+  },
+  scene: [TitleScene, GameScene, GameOverScene]
+};
+const game = new Phaser.Game(config);
+
+</script>
+</body>
+</html>

@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Touchdown Dash</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+const W = 800, H = 600;
+
+// ---------- Skins & saved progress ----------
+const SKINS = [
+  { id: 'blue',   name: 'Classic Blue',  color: 0x1c7ed6, cost: 0 },
+  { id: 'green',  name: 'Forest Green',  color: 0x2f9e44, cost: 0 },
+  { id: 'orange', name: 'Sunset Orange', color: 0xf76707, cost: 3 },
+  { id: 'pink',   name: 'Hot Pink',      color: 0xe64980, cost: 5 },
+  { id: 'purple', name: 'Galaxy Purple', color: 0x7048e8, cost: 8 },
+  { id: 'red',    name: 'Fire Red',      color: 0xe03131, cost: 10 },
+  { id: 'gold',   name: 'Gold MVP',      color: 0xf1c40f, cost: 20 },
+];
+
+function loadSave() {
+  let s;
+  try { s = JSON.parse(localStorage.getItem('touchdownDash') || '{}'); } catch (e) { s = {}; }
+  return {
+    coins: s.coins || 0,
+    selected: s.selected || 'blue',
+    unlocked: s.unlocked || ['blue', 'green'],
+  };
+}
+function writeSave(s) {
+  try { localStorage.setItem('touchdownDash', JSON.stringify(s)); } catch (e) {}
+}
+function addCoins(n) {
+  const s = loadSave();
+  s.coins += n;
+  writeSave(s);
+}
+function selectedColor() {
+  const s = loadSave();
+  const skin = SKINS.find(k => k.id === s.selected) || SKINS[0];
+  return skin.color;
+}
+
+// Draw a realistic football field onto a graphics/scene
+function drawField(scene) {
+  // grass with alternating mowed stripes
+  for (let i = 0; i < 12; i++) {
+    const c = (i % 2 === 0) ? 0x2f9e44 : 0x2b8a3e;
+    scene.add.rectangle(W/2, i * 50 + 25, W, 50, c);
+  }
+  // sidelines
+  scene.add.rectangle(W/2, 90, W, 4, 0xffffff);
+  scene.add.rectangle(W/2, H - 30, W, 4, 0xffffff);
+
+  // yard lines + numbers between the two end zones
+  const yardNums = ['10','20','30','40','50','40','30','20','10'];
+  const top = 90, bot = H - 30, span = bot - top;
+  for (let i = 1; i < 9; i++) {
+    const y = top + (span / 9) * i;
+    scene.add.rectangle(W/2, y, W - 20, 3, 0xffffff, 0.85);
+    // hash marks
+    for (let x = 60; x < W - 40; x += 30) {
+      scene.add.rectangle(x, y, 3, 10, 0xffffff, 0.6);
+    }
+    // yard numbers on both sides
+    scene.add.text(40, y, yardNums[i-1], { fontFamily: 'Arial Black, Arial', fontSize: '18px', color: '#ffffff' }).setOrigin(0.5).setAlpha(0.85);
+    scene.add.text(W - 40, y, yardNums[i-1], { fontFamily: 'Arial Black, Arial', fontSize: '18px', color: '#ffffff' }).setOrigin(0.5).setAlpha(0.85);
+  }
+
+  // top end zone (blue, your scoring zone)
+  scene.add.rectangle(W/2, 45, W, 90, 0x1864ab);
+  scene.add.text(W/2, 45, 'E N D   Z O N E', { fontFamily: 'Arial Black, Arial', fontSize: '30px', color: '#ffd43b' }).setOrigin(0.5);
+  // goal posts
+  const g = scene.add.graphics();
+  g.lineStyle(5, 0xffd43b, 1);
+  g.beginPath(); g.moveTo(W/2, 8); g.lineTo(W/2, 24); g.strokePath();      // post
+  g.beginPath(); g.moveTo(W/2 - 50, 8); g.lineTo(W/2 + 50, 8); g.strokePath(); // crossbar
+  g.beginPath(); g.moveTo(W/2 - 50, 8); g.lineTo(W/2 - 50, -10); g.strokePath();
+  g.beginPath(); g.moveTo(W/2 + 50, 8); g.lineTo(W/2 + 50, -10); g.strokePath();
+}
+
+// Build a little football player as a container
+function makePlayer(scene, x, y, jersey, isCarrier) {
+  const c = scene.add.container(x, y);
+  // shadow
+  c.add(scene.add.ellipse(0, 14, 28, 8, 0x000000, 0.25));
+  // body / jersey
+  c.add(scene.add.rectangle(0, 2, 22, 24, jersey).setStrokeStyle(2, 0x000000, 0.3));
+  // shoulder pads
+  c.add(scene.add.rectangle(0, -6, 28, 9, jersey).setStrokeStyle(2, 0x000000, 0.3));
+  // helmet
+  c.add(scene.add.circle(0, -16, 9, 0xf1f3f5));
+  // facemask
+  c.add(scene.add.rectangle(0, -13, 8, 3, 0x495057));
+  if (isCarrier) {
+    // football tucked under arm
+    c.add(scene.add.ellipse(12, 4, 16, 9, 0x7a3b10).setStrokeStyle(1, 0xffffff));
+  }
+  return c;
+}
+
+// ---------- Title Scene ----------
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+  create() {
+    drawField(this);
+    this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.35);
+
+    this.add.text(W/2, 140, 'TOUCHDOWN DASH', {
+      fontFamily: 'Arial Black, Arial', fontSize: '56px', color: '#ffffff',
+      stroke: '#1b1b1b', strokeThickness: 8
+    }).setOrigin(0.5);
+
+    this.add.text(W/2, 215, '🏈 Run to the end zone and score!', {
+      fontFamily: 'Arial', fontSize: '24px', color: '#ffd43b'
+    }).setOrigin(0.5);
+
+    const lines = [
+      'Arrow Keys  →  Move your player',
+      'SPACE  →  Throw a pass like a QB! 🏈',
+      'Run OR throw the ball into the blue END ZONE',
+      'Dodge the red defenders — they can intercept!',
+      'Score as many touchdowns as you can in 60 seconds'
+    ];
+    lines.forEach((t, i) => {
+      this.add.text(W/2, 286 + i*36, t, {
+        fontFamily: 'Arial', fontSize: '20px', color: '#ffffff'
+      }).setOrigin(0.5);
+    });
+
+    const prompt = this.add.text(W/2, 490, 'Press SPACE to Start Game', {
+      fontFamily: 'Arial Black, Arial', fontSize: '30px', color: '#ffffff',
+      backgroundColor: '#c0392b', padding: { x: 20, y: 10 }
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: prompt, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
+
+    this.add.text(W/2 - 130, 550, 'P: Practice Field', {
+      fontFamily: 'Arial Black, Arial', fontSize: '20px', color: '#ffd43b',
+      backgroundColor: '#1864ab', padding: { x: 14, y: 8 }
+    }).setOrigin(0.5);
+
+    this.add.text(W/2 + 130, 550, 'S: Skin Shop', {
+      fontFamily: 'Arial Black, Arial', fontSize: '20px', color: '#1b1b1b',
+      backgroundColor: '#ffd43b', padding: { x: 14, y: 8 }
+    }).setOrigin(0.5);
+
+    // show coin balance
+    this.add.text(W - 16, 12, '🪙 ' + loadSave().coins, {
+      fontFamily: 'Arial Black, Arial', fontSize: '24px', color: '#ffd43b',
+      stroke: '#000', strokeThickness: 4
+    }).setOrigin(1, 0);
+
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+    this.input.keyboard.once('keydown-P', () => this.scene.start('PracticeScene'));
+    this.input.keyboard.once('keydown-S', () => this.scene.start('ShopScene'));
+  }
+}
+
+// ---------- Skin Shop Scene ----------
+class ShopScene extends Phaser.Scene {
+  constructor() { super('ShopScene'); }
+
+  create() {
+    drawField(this);
+    this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.55);
+
+    this.add.text(W/2, 40, 'SKIN SHOP', {
+      fontFamily: 'Arial Black, Arial', fontSize: '44px', color: '#ffffff',
+      stroke: '#1b1b1b', strokeThickness: 8
+    }).setOrigin(0.5);
+
+    this.coinText = this.add.text(W/2, 88, '', {
+      fontFamily: 'Arial Black, Arial', fontSize: '24px', color: '#ffd43b'
+    }).setOrigin(0.5);
+
+    this.msg = this.add.text(W/2, H - 60, 'Earn 1 coin for every touchdown you score!', {
+      fontFamily: 'Arial', fontSize: '20px', color: '#ffffff'
+    }).setOrigin(0.5);
+
+    this.add.text(W/2, H - 28, 'Click a skin to buy or wear it    •    ESC: back to menu', {
+      fontFamily: 'Arial', fontSize: '16px', color: '#ffffff'
+    }).setOrigin(0.5).setAlpha(0.85);
+
+    this.cards = [];
+    this.buildCards();
+    this.refresh();
+
+    this.input.keyboard.once('keydown-ESC', () => this.scene.start('TitleScene'));
+  }
+
+  buildCards() {
+    const cols = 4, cardW = 165, cardH = 150, gapX = 20, gapY = 24;
+    const startX = (W - (cols * cardW + (cols - 1) * gapX)) / 2 + cardW / 2;
+    const startY = 175;
+    SKINS.forEach((skin, i) => {
+      const cx = startX + (i % cols) * (cardW + gapX);
+      const cy = startY + Math.floor(i / cols) * (cardH + gapY);
+
+      const box = this.add.rectangle(cx, cy, cardW, cardH, 0x14213d).setStrokeStyle(3, 0xffffff, 0.6).setInteractive({ useHandCursor: true });
+      makePlayer(this, cx, cy - 22, skin.color, true);
+      const name = this.add.text(cx, cy + 22, skin.name, { fontFamily: 'Arial Black, Arial', fontSize: '15px', color: '#ffffff' }).setOrigin(0.5);
+      const status = this.add.text(cx, cy + 48, '', { fontFamily: 'Arial Black, Arial', fontSize: '16px', color: '#ffd43b' }).setOrigin(0.5);
+
+      box.on('pointerdown', () => this.onClick(skin));
+      box.on('pointerover', () => box.setStrokeStyle(4, 0xffd43b, 1));
+      box.on('pointerout', () => this.refresh());
+
+      this.cards.push({ skin, box, status });
+    });
+  }
+
+  onClick(skin) {
+    const s = loadSave();
+    const owned = s.unlocked.includes(skin.id);
+    if (owned) {
+      s.selected = skin.id;
+      writeSave(s);
+      this.flash(skin.name + ' equipped!');
+    } else if (s.coins >= skin.cost) {
+      s.coins -= skin.cost;
+      s.unlocked.push(skin.id);
+      s.selected = skin.id;
+      writeSave(s);
+      this.flash('Unlocked ' + skin.name + '!');
+    } else {
+      this.flash('Need ' + (skin.cost - s.coins) + ' more coins for that one!');
+    }
+    this.refresh();
+  }
+
+  flash(text) {
+    this.msg.setText(text);
+  }
+
+  refresh() {
+    const s = loadSave();
+    this.coinText.setText('🪙 ' + s.coins + ' coins');
+    this.cards.forEach(c => {
+      const owned = s.unlocked.includes(c.skin.id);
+      const worn = s.selected === c.skin.id;
+      c.box.setStrokeStyle(3, worn ? 0xffd43b : 0xffffff, worn ? 1 : 0.6);
+      c.box.setFillStyle(worn ? 0x1f3a5f : 0x14213d);
+      if (worn) c.status.setText('WEARING').setColor('#7CFC00');
+      else if (owned) c.status.setText('Tap to wear').setColor('#ffffff');
+      else c.status.setText('🪙 ' + c.skin.cost).setColor('#ffd43b');
+    });
+  }
+}
+
+// ---------- Practice Scene ----------
+class PracticeScene extends Phaser.Scene {
+  constructor() { super('PracticeScene'); }
+
+  create() {
+    this.score = 0;
+    this.playerSpeed = 300;
+    this.dummiesOn = false;
+
+    drawField(this);
+
+    // Player — the running back (wears the chosen skin)
+    this.player = makePlayer(this, W/2, H - 70, selectedColor(), true);
+    this.physics.add.existing(this.player);
+    this.player.body.setSize(24, 30);
+    this.player.body.setOffset(-12, -18);
+    this.player.body.setCollideWorldBounds(true);
+
+    // Optional tackling dummies (stay still until you turn them on)
+    this.dummies = this.physics.add.group();
+    this.physics.add.overlap(this.player, this.dummies, this.bumpDummy, null, this);
+
+    // Scoreboard
+    this.add.rectangle(W/2, 0, W, 30, 0x000000, 0.55).setOrigin(0.5, 0);
+    this.add.text(16, 4, 'PRACTICE FIELD', {
+      fontFamily: 'Arial Black, Arial', fontSize: '20px', color: '#ffd43b'
+    });
+    this.scoreText = this.add.text(W - 16, 4, 'TDs  0', {
+      fontFamily: 'Arial Black, Arial', fontSize: '20px', color: '#ffffff'
+    }).setOrigin(1, 0);
+
+    // Help text at the bottom
+    this.add.text(W/2, H - 12, 'No clock — run freely!   D: toggle dummies   ESC: back to menu', {
+      fontFamily: 'Arial', fontSize: '16px', color: '#ffffff'
+    }).setOrigin(0.5).setAlpha(0.85);
+
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.input.keyboard.on('keydown-D', () => this.toggleDummies());
+    this.input.keyboard.once('keydown-ESC', () => this.scene.start('TitleScene'));
+  }
+
+  toggleDummies() {
+    this.dummiesOn = !this.dummiesOn;
+    if (this.dummiesOn) {
+      for (let i = 0; i < 5; i++) {
+        const d = makePlayer(this, Phaser.Math.Between(80, W - 80), Phaser.Math.Between(150, H - 200), 0xe03131, false);
+        this.physics.add.existing(d);
+        d.body.setSize(24, 30);
+        d.body.setOffset(-12, -18);
+        this.dummies.add(d);
+      }
+    } else {
+      this.dummies.clear(true, true);
+    }
+  }
+
+  bumpDummy() {
+    // gentle nudge back — no penalty, it's practice
+    this.player.setPosition(W/2, H - 70);
+    this.player.body.setVelocity(0, 0);
+  }
+
+  update() {
+    const b = this.player.body;
+    b.setVelocity(0);
+    if (this.cursors.left.isDown)  b.setVelocityX(-this.playerSpeed);
+    if (this.cursors.right.isDown) b.setVelocityX(this.playerSpeed);
+    if (this.cursors.up.isDown)    b.setVelocityY(-this.playerSpeed);
+    if (this.cursors.down.isDown)  b.setVelocityY(this.playerSpeed);
+
+    if (this.player.y < 90) {
+      this.score++;
+      this.scoreText.setText('TDs  ' + this.score);
+      const td = this.add.text(W/2, H/2, 'TOUCHDOWN! 🏈', {
+        fontFamily: 'Arial Black, Arial', fontSize: '44px', color: '#ffffff',
+        stroke: '#c0392b', strokeThickness: 8
+      }).setOrigin(0.5);
+      this.tweens.add({ targets: td, scale: 1.4, alpha: 0, duration: 900, onComplete: () => td.destroy() });
+      this.player.setPosition(W/2, H - 70);
+      this.player.body.setVelocity(0, 0);
+    }
+  }
+}
+
+// ---------- Game Scene ----------
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+
+  create() {
+    this.score = 0;
+    this.timeLeft = 60;
+    this.playerSpeed = 300;
+
+    drawField(this);
+
+    // Player — the running back (wears the chosen skin)
+    this.player = makePlayer(this, W/2, H - 70, selectedColor(), true);
+    this.physics.add.existing(this.player);
+    this.player.body.setSize(24, 30);
+    this.player.body.setOffset(-12, -18);
+    this.player.body.setCollideWorldBounds(true);
+
+    // Defenders chase the player
+    this.tacklers = this.physics.add.group();
+    this.time.addEvent({ delay: 2500, loop: true, callback: () => this.spawnTackler() });
+    for (let i = 0; i < 4; i++) this.spawnTackler();
+
+    this.physics.add.overlap(this.player, this.tacklers, this.getTackled, null, this);
+
+    // Scoreboard
+    this.add.rectangle(W/2, 0, W, 30, 0x000000, 0.55).setOrigin(0.5, 0);
+    this.scoreText = this.add.text(16, 4, 'TOUCHDOWNS  0', {
+      fontFamily: 'Arial Black, Arial', fontSize: '20px', color: '#ffd43b'
+    });
+    this.timeText = this.add.text(W - 16, 4, '0:60', {
+      fontFamily: 'Arial Black, Arial', fontSize: '20px', color: '#ffffff'
+    }).setOrigin(1, 0);
+
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.ball = null; // the thrown football (only one in the air at a time)
+
+    this.time.addEvent({
+      delay: 1000, loop: true, callback: () => {
+        this.timeLeft--;
+        this.updateClock();
+        if (this.timeLeft <= 0) this.endGame();
+      }
+    });
+  }
+
+  throwPass() {
+    if (this.ball) return; // one pass in the air at a time
+    const b = this.add.ellipse(this.player.x, this.player.y - 12, 22, 12, 0x7a3b10);
+    b.setStrokeStyle(2, 0xffffff);
+    this.physics.add.existing(b);
+    b.body.setVelocityY(-560);
+    b.body.setVelocityX(this.player.body.velocity.x * 0.4);
+    this.tweens.add({ targets: b, angle: 360, duration: 450, repeat: -1 });
+    this.ball = b;
+  }
+
+  completePass() {
+    this.ball.destroy(); this.ball = null;
+    this.score++;
+    addCoins(1);
+    this.scoreText.setText('TOUCHDOWNS  ' + this.score);
+    const td = this.add.text(W/2, H/2, 'TD PASS! 🏈', {
+      fontFamily: 'Arial Black, Arial', fontSize: '48px', color: '#ffffff',
+      stroke: '#1864ab', strokeThickness: 8
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: td, scale: 1.4, alpha: 0, duration: 900, onComplete: () => td.destroy() });
+  }
+
+  interceptPass(t) {
+    this.ball.destroy(); this.ball = null;
+    this.timeLeft = Math.max(0, this.timeLeft - 2);
+    this.updateClock();
+    const m = this.add.text(t.x, t.y - 30, 'INTERCEPTED! -2s', {
+      fontFamily: 'Arial Black, Arial', fontSize: '20px', color: '#ff6b6b',
+      stroke: '#000', strokeThickness: 4
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: m, y: m.y - 30, alpha: 0, duration: 800, onComplete: () => m.destroy() });
+  }
+
+  updateClock() {
+    const s = Math.max(0, this.timeLeft);
+    this.timeText.setText('0:' + (s < 10 ? '0' + s : s));
+  }
+
+  spawnTackler() {
+    if (this.tacklers.getLength() >= 9) return;
+    // spawn from the sides/top, away from the player's start
+    const x = Phaser.Math.Between(60, W - 60);
+    const y = Phaser.Math.Between(120, H - 220);
+    const t = makePlayer(this, x, y, 0xe03131, false);
+    this.physics.add.existing(t);
+    t.body.setSize(24, 30);
+    t.body.setOffset(-12, -18);
+    t.body.setCollideWorldBounds(true);
+    // chase speed scales a little with score
+    t.chaseSpeed = Phaser.Math.Between(120, 150) + this.score * 6;
+    this.tacklers.add(t);
+  }
+
+  getTackled() {
+    this.cameras.main.shake(220, 0.012);
+    this.player.setPosition(W/2, H - 70);
+    this.player.body.setVelocity(0, 0);
+    this.timeLeft = Math.max(0, this.timeLeft - 3);
+    this.updateClock();
+    const oops = this.add.text(this.player.x, this.player.y - 40, 'TACKLED! -3s', {
+      fontFamily: 'Arial Black, Arial', fontSize: '20px', color: '#ff6b6b',
+      stroke: '#000', strokeThickness: 4
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: oops, y: oops.y - 30, alpha: 0, duration: 800, onComplete: () => oops.destroy() });
+  }
+
+  scoreTouchdown() {
+    this.score++;
+    addCoins(1);
+    this.scoreText.setText('TOUCHDOWNS  ' + this.score);
+    const td = this.add.text(W/2, H/2, 'TOUCHDOWN! 🏈', {
+      fontFamily: 'Arial Black, Arial', fontSize: '48px', color: '#ffffff',
+      stroke: '#c0392b', strokeThickness: 8
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: td, scale: 1.4, alpha: 0, duration: 900, onComplete: () => td.destroy() });
+    this.player.setPosition(W/2, H - 70);
+    this.player.body.setVelocity(0, 0);
+    // give a tiny breather: push defenders back up the field
+    this.tacklers.getChildren().forEach(t => t.setPosition(
+      Phaser.Math.Between(60, W - 60), Phaser.Math.Between(120, H - 250)));
+  }
+
+  update() {
+    const b = this.player.body;
+    b.setVelocity(0);
+    if (this.cursors.left.isDown)  b.setVelocityX(-this.playerSpeed);
+    if (this.cursors.right.isDown) b.setVelocityX(this.playerSpeed);
+    if (this.cursors.up.isDown)    b.setVelocityY(-this.playerSpeed);
+    if (this.cursors.down.isDown)  b.setVelocityY(this.playerSpeed);
+
+    // defenders home in on the player
+    this.tacklers.getChildren().forEach(t => {
+      this.physics.moveToObject(t, this.player, t.chaseSpeed);
+    });
+
+    // QB: throw a pass toward the end zone
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) this.throwPass();
+    if (this.ball) {
+      let picked = null;
+      this.tacklers.getChildren().forEach(t => {
+        if (Phaser.Math.Distance.Between(this.ball.x, this.ball.y, t.x, t.y) < 26) picked = t;
+      });
+      if (picked) this.interceptPass(picked);
+      else if (this.ball.y < 90) this.completePass();
+      else if (this.ball.y < -30) { this.ball.destroy(); this.ball = null; }
+    }
+
+    if (this.player.y < 90) this.scoreTouchdown();
+  }
+
+  endGame() { this.scene.start('GameOverScene', { score: this.score }); }
+}
+
+// ---------- Game Over Scene ----------
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  init(data) { this.finalScore = data.score || 0; }
+  create() {
+    drawField(this);
+    this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.55);
+
+    this.add.text(W/2, 150, "TIME'S UP!", {
+      fontFamily: 'Arial Black, Arial', fontSize: '56px', color: '#ffffff',
+      stroke: '#000', strokeThickness: 8
+    }).setOrigin(0.5);
+
+    this.add.text(W/2, 270, 'Touchdowns: ' + this.finalScore, {
+      fontFamily: 'Arial Black, Arial', fontSize: '40px', color: '#ffd43b'
+    }).setOrigin(0.5);
+
+    this.add.text(W/2, 340, 'Final Score: ' + (this.finalScore * 7), {
+      fontFamily: 'Arial', fontSize: '30px', color: '#ffffff'
+    }).setOrigin(0.5);
+
+    let msg = 'Nice running!';
+    if (this.finalScore >= 10) msg = 'MVP! You are unstoppable!';
+    else if (this.finalScore >= 5) msg = 'Great game, superstar!';
+    this.add.text(W/2, 410, msg, {
+      fontFamily: 'Arial', fontSize: '26px', color: '#7CFC00'
+    }).setOrigin(0.5);
+
+    const prompt = this.add.text(W/2, 510, 'Press SPACE to Play Again', {
+      fontFamily: 'Arial Black, Arial', fontSize: '30px', color: '#ffffff',
+      backgroundColor: '#c0392b', padding: { x: 20, y: 10 }
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: prompt, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
+
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+  }
+}
+
+const config = {
+  type: Phaser.AUTO,
+  width: W,
+  height: H,
+  physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+  scene: [TitleScene, GameScene, PracticeScene, ShopScene, GameOverScene]
+};
+
+const game = new Phaser.Game(config);
+</script>
+</body>
+</html>

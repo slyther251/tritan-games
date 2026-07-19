@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Melon Soccer — Minecraft Edition</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+<script>
+// ─── constants ────────────────────────────────────────────────────────────────
+const W = 900, H = 600, SURF = 480;
+const MENU_Y = 548;       // top of weapon strip
+const BTN_W  = 110, BTN_H = 50, BTN_GAP = 2;
+const MENU_START_X = Math.round((W - 8 * BTN_W - 7 * BTN_GAP) / 2); // ≈ 3
+
+// ── 67 box ────────────────────────────────────────────────────────────────────
+const BOX67_X = 140, BOX67_Y = SURF - 25, BOX67_SIZE = 44;
+
+const CAT_GROUND  = 0x0001;
+const CAT_RAGDOLL = 0x0002;
+const CAT_BALL    = 0x0004;
+const CAT_PROP    = 0x0008;   // crates, bats, bowling balls
+
+const PLATFORMS_VIS = [
+  { x: 150, y: 380, cols: 3 },
+  { x: 400, y: 320, cols: 4 },
+  { x: 680, y: 360, cols: 3 },
+];
+const PLATFORMS_PHYS = [
+  { cx: 198, cy: 396, w: 96  },
+  { cx: 464, cy: 336, w: 128 },
+  { cx: 728, cy: 376, w: 96  },
+];
+
+// Weapon definitions (order = left→right in menu)
+const WEAPONS = [
+  { id: 'ball',    label: 'Ball'    },
+  { id: 'bigball', label: 'Bowling' },
+  { id: 'crate',   label: 'Crate'   },
+  { id: 'tnt',     label: 'TNT'     },
+  { id: 'rocket',  label: 'Rocket'  },
+  { id: 'bat',     label: 'Bat'     },
+  { id: 'creeper', label: 'Creeper' },
+  { id: 'steve',   label: 'Steve'   },
+];
+
+// ─── SandboxScene ─────────────────────────────────────────────────────────────
+class SandboxScene extends Phaser.Scene {
+  constructor() { super('SandboxScene'); }
+
+  get M() { return Phaser.Physics.Matter.Matter; }
+
+  create() {
+    this.matter.world.setBounds(0, 0, W, H, 64, true, true, true, true);
+    this.matter.world.setGravity(0, 2);
+
+    // ── static bodies ─────────────────────────────────────────────────────────
+    const staticOpt = {
+      isStatic: true,
+      collisionFilter: { category: CAT_GROUND, mask: 0xffff },
+      friction: 0.9, restitution: 0.1,
+    };
+    this.matter.add.rectangle(W / 2, SURF + 25, W, 50, { ...staticOpt, label: 'ground' });
+    PLATFORMS_PHYS.forEach(p =>
+      this.matter.add.rectangle(p.cx, p.cy, p.w, 16, { ...staticOpt, label: 'platform' })
+    );
+
+    // ── graphics layers ───────────────────────────────────────────────────────
+    this.bgGfx       = this.add.graphics().setDepth(0);
+    this.gfx         = this.add.graphics().setDepth(5);
+    this.fxGfx       = this.add.graphics().setDepth(8);
+    this.portalGfx   = this.add.graphics().setDepth(11);
+    this.menuBgGfx   = this.add.graphics().setDepth(14);
+    this.menuHovGfx  = this.add.graphics().setDepth(16);
+
+    this.drawBackground();
+    this._buildWeaponMenu();
+    this._build67Box();
+
+    // ── state ─────────────────────────────────────────────────────────────────
+    this.ragdolls   = [];
+    this.balls      = [];
+    this.bigballs   = [];
+    this.crates     = [];
+    this.tnts       = [];
+    this.rockets    = [];
+    this.bats       = [];
+    this.explosions = [];
+    this.dragConstraint = null;
+    this.hoveredBtn = -1;
+    this.gun67Active  = false;
+    this.portals      = [];    // max 2: [{x,y,color,born,flashAt}]
+    this.portalShots  = [];    // [{x1,y1,x2,y2,born,color,destX,destY}]
+
+    // ── initial spawns ────────────────────────────────────────────────────────
+    this.spawnRagdoll(300, 100, 'creeper');
+    this.spawnRagdoll(560,  80, 'steve');
+    this.spawnBall(200, 300);
+    this.spawnBall(650, 250);
+
+    // ── keyboard shortcuts ────────────────────────────────────────────────────
+    this.input.keyboard.on('keydown-R', () =>
+      this.spawnRagdoll(Phaser.Math.Between(80, 820), 50, Math.random() < 0.5 ? 'creeper' : 'steve'));
+    this.input.keyboard.on('keydown-B', () =>
+      this.spawnBall(Phaser.Math.Between(80, 820), 100));
+    this.input.keyboard.on('keydown-T', () =>
+      this.spawnTNT(Phaser.Math.Between(100, 800), 100));
+    this.input.keyboard.on('keydown-SPACE', () => this.firecannon());
+
+    this.input.on('pointerdown', p => this.onDown(p));
+    this.input.on('pointermove', p => this.onMove(p));
+    this.input.on('pointerup',   () => this.onUp());
+  }
+
+  // ── weapon menu ─────────────────────────────────────────────────────────────
+  _buildWeaponMenu() {
+    const g = this.menuBgGfx;
+
+    // Panel background
+    g.fillStyle(0x111111, 0.95);
+    g.fillRect(0, MENU_Y - 3, W, H - MENU_Y + 3);
+    g.lineStyle(2, 0x444444);
+    g.lineBetween(0, MENU_Y - 3, W, MENU_Y - 3);
+
+    WEAPONS.forEach((wpn, i) => {
+      const bx = MENU_START_X + i * (BTN_W + BTN_GAP);
+      const by = MENU_Y + 1;
+
+      // Button background
+      g.fillStyle(0x252525);
+      g.fillRect(bx, by, BTN_W, BTN_H);
+      g.lineStyle(1, 0x3a3a3a);
+      g.strokeRect(bx, by, BTN_W, BTN_H);
+
+      // Icon drawn once (static)
+      this._drawIcon(g, bx + BTN_W / 2, by + 18, wpn.id);
+
+      // Label text
+      this.add.text(bx + BTN_W / 2, by + 33, wpn.label, {
+        fontSize: '11px', fontFamily: 'monospace', color: '#aaaaaa'
+      }).setOrigin(0.5, 0).setDepth(17);
+
+      // Interactive zone
+      const zone = this.add.zone(bx + BTN_W / 2, by + BTN_H / 2, BTN_W, BTN_H)
+        .setInteractive().setDepth(20);
+      zone.on('pointerdown', () => this._clickWeapon(wpn.id));
+      zone.on('pointerover', () => { this.hoveredBtn = i; });
+      zone.on('pointerout',  () => { if (this.hoveredBtn === i) this.hoveredBtn = -1; });
+    });
+
+    // Header label
+    this.add.text(W - 4, MENU_Y - 1, 'WEAPONS ▼', {
+      fontSize: '10px', fontFamily: 'monospace', color: '#666666'
+    }).setOrigin(1, 1).setDepth(17);
+  }
+
+  _drawIcon(g, cx, cy, id) {
+    const r = 11;
+    switch (id) {
+      case 'ball':
+        g.fillStyle(0xffffff); g.fillCircle(cx, cy, r);
+        g.fillStyle(0x111111);
+        for (let i = 0; i < 5; i++) {
+          const a = i / 5 * Math.PI * 2;
+          g.fillCircle(cx + Math.cos(a) * r * 0.55, cy + Math.sin(a) * r * 0.55, r * 0.25);
+        }
+        break;
+      case 'bigball':
+        g.fillStyle(0x333333); g.fillCircle(cx, cy, r + 3);
+        g.fillStyle(0x666666); g.fillCircle(cx - 3, cy - 4, 4);
+        g.lineStyle(1.5, 0x111111); g.strokeCircle(cx, cy, r + 3);
+        break;
+      case 'crate':
+        g.fillStyle(0x8B5e3c); g.fillRect(cx - r, cy - r, r * 2, r * 2);
+        g.lineStyle(1.5, 0x5a3a1a);
+        g.lineBetween(cx - r, cy - r, cx + r, cy + r);
+        g.lineBetween(cx + r, cy - r, cx - r, cy + r);
+        g.strokeRect(cx - r, cy - r, r * 2, r * 2);
+        break;
+      case 'tnt':
+        g.fillStyle(0xcc2222); g.fillRect(cx - r, cy - r, r * 2, r * 2);
+        g.fillStyle(0xffffff); g.fillRect(cx - r, cy - 3, r * 2, 6);
+        g.fillStyle(0xcc2222); g.fillRect(cx - 2, cy - 3, 4, 6);
+        g.lineStyle(1.5, 0x880000); g.strokeRect(cx - r, cy - r, r * 2, r * 2);
+        break;
+      case 'rocket':
+        g.fillStyle(0xdd3300);
+        g.fillTriangle(cx, cy - r - 3, cx - 6, cy + r, cx + 6, cy + r);
+        g.fillStyle(0xff6600);
+        g.fillTriangle(cx - 5, cy + r, cx + 5, cy + r, cx, cy + r + 8);
+        g.fillStyle(0xffaa00, 0.6);
+        g.fillTriangle(cx - 3, cy + r, cx + 3, cy + r, cx, cy + r + 5);
+        break;
+      case 'bat':
+        g.fillStyle(0x7a4f2a); g.fillRect(cx - 3, cy - r - 3, 6, r * 2 + 6);
+        g.fillStyle(0xaa7744); g.fillRect(cx - 5, cy - r - 3, 10, 7);
+        g.lineStyle(1, 0x3a2010);
+        g.strokeRect(cx - 3, cy - r - 3, 6, r * 2 + 6);
+        break;
+      case 'creeper':
+        g.fillStyle(0x36a517); g.fillRect(cx - r, cy - r, r * 2, r * 2);
+        g.fillStyle(0x000000);
+        g.fillRect(cx - 7, cy - 3, 5, 5); g.fillRect(cx + 2, cy - 3, 5, 5);
+        g.fillRect(cx - 2, cy + 3, 4, 4);
+        break;
+      case 'steve':
+        g.fillStyle(0xffd9a8); g.fillRect(cx - r, cy - r, r * 2, r * 2);
+        g.fillStyle(0x3b5998);
+        g.fillRect(cx - 7, cy - 3, 5, 4); g.fillRect(cx + 2, cy - 3, 5, 4);
+        g.fillStyle(0x8B5e3c); g.fillRect(cx - 4, cy + 4, 8, 2);
+        break;
+    }
+  }
+
+  _clickWeapon(id) {
+    const rx = Phaser.Math.Between(200, 700);
+    switch (id) {
+      case 'ball':    this.spawnBall(rx, 60);   break;
+      case 'bigball': this.spawnBigBall(rx, 60); break;
+      case 'crate':   this.spawnCrate(rx, 60);  break;
+      case 'tnt':     this.spawnTNT(rx, 60);    break;
+      case 'rocket':  this.spawnRocket(rx, 60); break;
+      case 'bat':     this.spawnBat(rx, 60);    break;
+      case 'creeper': this.spawnRagdoll(rx, 60, 'creeper'); break;
+      case 'steve':   this.spawnRagdoll(rx, 60, 'steve');   break;
+    }
+  }
+
+  // ── background ──────────────────────────────────────────────────────────────
+  drawBackground() {
+    const g = this.bgGfx;
+    g.fillStyle(0x87ceeb); g.fillRect(0, 0, W, SURF);
+
+    // Clouds
+    g.fillStyle(0xffffff, 0.85);
+    [[80,60,90,28],[250,40,70,22],[500,70,110,30],[720,50,80,24]].forEach(([x,y,w,h]) =>
+      g.fillRect(x, y, w, h));
+
+    // Sun
+    g.fillStyle(0xffff55); g.fillRect(820, 30, 48, 48);
+    g.fillStyle(0xffee00); g.fillRect(826, 36, 36, 36);
+
+    // Dirt + grass
+    g.fillStyle(0x8B5e3c); g.fillRect(0, SURF, W, H - SURF);
+    g.fillStyle(0x4a8c28); g.fillRect(0, SURF, W, 8);
+    g.fillStyle(0x3d7a20);
+    for (let x = 4; x < W; x += 16) g.fillRect(x, SURF - 4, 4, 4);
+
+    // Platforms
+    PLATFORMS_VIS.forEach(({ x, y, cols }) => {
+      for (let c = 0; c < cols; c++) {
+        const bx = x + c * 32;
+        g.fillStyle(0x8B5e3c); g.fillRect(bx, y + 8, 32, 24);
+        g.fillStyle(0x4a8c28); g.fillRect(bx, y, 32, 8);
+        g.fillStyle(0x3d7a20); g.fillRect(bx + 4, y - 4, 4, 4);
+        g.lineStyle(1, 0x000000, 0.25); g.strokeRect(bx, y, 32, 32);
+      }
+    });
+
+    // Goal post (right)
+    const gx = 860, gy = SURF - 100;
+    g.fillStyle(0xffffff);
+    g.fillRect(gx, gy, 8, 100); g.fillRect(gx - 64, gy, 8, 100); g.fillRect(gx - 64, gy, 72, 8);
+    g.lineStyle(1, 0x000000, 0.4);
+    for (let nx = 0; nx < 4; nx++) g.lineBetween(gx - 64 + nx * 16, gy + 8, gx - 64 + nx * 16, gy + 100);
+    for (let ny = 0; ny < 4; ny++) g.lineBetween(gx - 64, gy + 8 + ny * 23, gx, gy + 8 + ny * 23);
+
+    // Cannon (left)
+    const ccx = 30, ccy = SURF - 40;
+    g.fillStyle(0x444444); g.fillRect(ccx - 10, ccy, 20, 40);
+    g.fillStyle(0x333333); g.fillRect(ccx - 8, ccy - 18, 50, 14);
+    g.fillStyle(0x555555); g.fillRect(ccx - 8, ccy - 16, 46, 10);
+    g.fillStyle(0x888888); g.fillRect(ccx - 5, ccy - 10, 6, 10);
+
+    // HUD hint (top-left, above everything)
+    this.add.text(8, 6, '[SPACE] Cannon  |  Click & drag anything!', {
+      fontSize: '12px', fontFamily: 'monospace',
+      fill: '#ffffff', stroke: '#000000', strokeThickness: 3
+    }).setDepth(10);
+  }
+
+  // ── spawn methods ────────────────────────────────────────────────────────────
+  spawnRagdoll(x, y, type) {
+    const M = this.M, world = this.matter.world.localWorld;
+    const opt = () => ({
+      density: 0.002, frictionAir: 0.025, friction: 0.6, restitution: 0.3,
+      collisionFilter: { category: CAT_RAGDOLL, mask: CAT_GROUND | CAT_BALL | CAT_PROP },
+      label: 'ragdoll'
+    });
+    const head  = M.Bodies.circle(x,       y - 50, 13, opt());
+    const torso = M.Bodies.rectangle(x,    y - 18, 14, 28, opt());
+    const lUA   = M.Bodies.rectangle(x-16, y - 26,  8, 18, opt());
+    const rUA   = M.Bodies.rectangle(x+16, y - 26,  8, 18, opt());
+    const lLA   = M.Bodies.rectangle(x-18, y -  6,  8, 18, opt());
+    const rLA   = M.Bodies.rectangle(x+18, y -  6,  8, 18, opt());
+    const lUL   = M.Bodies.rectangle(x- 6, y + 12, 10, 22, opt());
+    const rUL   = M.Bodies.rectangle(x+ 6, y + 12, 10, 22, opt());
+    const lLL   = M.Bodies.rectangle(x- 6, y + 36, 10, 22, opt());
+    const rLL   = M.Bodies.rectangle(x+ 6, y + 36, 10, 22, opt());
+    const bodies = [head, torso, lUA, rUA, lLA, rLA, lUL, rUL, lLL, rLL];
+
+    const mkC = (bA, bB, pA, pB, s) =>
+      M.Constraint.create({ bodyA: bA, bodyB: bB, pointA: pA, pointB: pB, stiffness: s, length: 0, damping: 0.05 });
+    const constraints = [
+      mkC(head,  torso, {x:0,y:13},  {x:0,y:-14}, 0.8),
+      mkC(torso, lUA,   {x:-7,y:-10},{x:0,y:-9},  0.4),
+      mkC(torso, rUA,   {x:7,y:-10}, {x:0,y:-9},  0.4),
+      mkC(lUA,   lLA,   {x:0,y:9},   {x:0,y:-9},  0.3),
+      mkC(rUA,   rLA,   {x:0,y:9},   {x:0,y:-9},  0.3),
+      mkC(torso, lUL,   {x:-5,y:14}, {x:0,y:-11}, 0.7),
+      mkC(torso, rUL,   {x:5,y:14},  {x:0,y:-11}, 0.7),
+      mkC(lUL,   lLL,   {x:0,y:11},  {x:0,y:-11}, 0.3),
+      mkC(rUL,   rLL,   {x:0,y:11},  {x:0,y:-11}, 0.3),
+    ];
+    M.World.add(world, [...bodies, ...constraints]);
+    this.ragdolls.push({ bodies, constraints, type, color: type === 'creeper' ? 0x36a517 : 0xffd9a8 });
+    if (this.ragdolls.length > 8) this._removeOldest('ragdolls');
+  }
+
+  spawnBall(x, y) {
+    const M = this.M;
+    const body = M.Bodies.circle(x, y, 14, {
+      restitution: 0.75, friction: 0.4, frictionAir: 0.008, density: 0.002,
+      collisionFilter: { category: CAT_BALL, mask: 0xffff }, label: 'ball'
+    });
+    M.World.add(this.matter.world.localWorld, body);
+    this.balls.push({ body, angle: 0 });
+    if (this.balls.length > 12) this._removeOldest('balls');
+  }
+
+  spawnBigBall(x, y) {
+    const M = this.M;
+    const body = M.Bodies.circle(x, y, 26, {
+      restitution: 0.3, friction: 0.5, frictionAir: 0.005, density: 0.012,
+      collisionFilter: { category: CAT_PROP, mask: 0xffff }, label: 'bigball'
+    });
+    M.World.add(this.matter.world.localWorld, body);
+    this.bigballs.push({ body });
+    if (this.bigballs.length > 6) this._removeOldest('bigballs');
+  }
+
+  spawnCrate(x, y) {
+    const M = this.M;
+    const body = M.Bodies.rectangle(x, y, 38, 38, {
+      restitution: 0.25, friction: 0.7, frictionAir: 0.01, density: 0.005,
+      collisionFilter: { category: CAT_PROP, mask: 0xffff }, label: 'crate'
+    });
+    M.World.add(this.matter.world.localWorld, body);
+    this.crates.push({ body });
+    if (this.crates.length > 8) this._removeOldest('crates');
+  }
+
+  spawnTNT(x, y) {
+    const M = this.M;
+    const body = M.Bodies.rectangle(x, y, 28, 28, {
+      restitution: 0.4, friction: 0.6, frictionAir: 0.01, density: 0.003,
+      collisionFilter: { category: CAT_BALL, mask: 0xffff }, label: 'tnt'
+    });
+    M.World.add(this.matter.world.localWorld, body);
+    this.tnts.push({ body, born: this.time.now });
+  }
+
+  spawnRocket(x, y) {
+    const M = this.M;
+    const ptr = this.input.activePointer;
+    const dx = ptr.x - x, dy = ptr.y - y;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    const body = M.Bodies.circle(x, y, 7, {
+      restitution: 0.1, friction: 0.1, frictionAir: 0.002, density: 0.003,
+      collisionFilter: { category: CAT_BALL, mask: 0xffff }, label: 'rocket'
+    });
+    M.Body.setVelocity(body, { x: dx / len * 16, y: dy / len * 16 });
+    M.World.add(this.matter.world.localWorld, body);
+    this.rockets.push({ body, born: this.time.now });
+  }
+
+  spawnBat(x, y) {
+    const M = this.M;
+    const body = M.Bodies.rectangle(x, y, 8, 52, {
+      restitution: 0.55, friction: 0.5, frictionAir: 0.01, density: 0.0015,
+      collisionFilter: { category: CAT_PROP, mask: 0xffff }, label: 'bat'
+    });
+    M.World.add(this.matter.world.localWorld, body);
+    this.bats.push({ body });
+    if (this.bats.length > 6) this._removeOldest('bats');
+  }
+
+  _removeOldest(list) {
+    const M = this.M, world = this.matter.world.localWorld;
+    const old = this[list].shift();
+    if (!old) return;
+    if (old.bodies) {
+      old.bodies.forEach(b => M.World.remove(world, b));
+      old.constraints.forEach(c => M.World.remove(world, c));
+    } else {
+      M.World.remove(world, old.body);
+    }
+  }
+
+  firecannon() {
+    const M = this.M, world = this.matter.world.localWorld;
+    const ptr = this.input.activePointer;
+    const ox = 55, oy = SURF - 33;
+    const dx = ptr.x - ox, dy = ptr.y - oy;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    const ball = M.Bodies.circle(ox + 20, oy, 10, {
+      restitution: 0.5, friction: 0.3, frictionAir: 0.005, density: 0.004,
+      collisionFilter: { category: CAT_BALL, mask: 0xffff }, label: 'ball'
+    });
+    M.Body.setVelocity(ball, { x: dx / len * 6.6, y: dy / len * 6.6 });
+    M.World.add(world, ball);
+    this.balls.push({ body: ball, angle: 0 });
+    if (this.balls.length > 12) this._removeOldest('balls');
+    this.cameras.main.shake(120, 0.007);
+  }
+
+  // ── explosions ───────────────────────────────────────────────────────────────
+  _explode(x, y, radius, force) {
+    const M = this.M, world = this.matter.world.localWorld;
+    this.explosions.push({ x, y, born: this.time.now });
+    this.cameras.main.shake(180, 0.012);
+    M.Composite.allBodies(world).forEach(b => {
+      if (b.isStatic) return;
+      const dx = b.position.x - x, dy = b.position.y - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < radius && dist > 0.1) {
+        const mag = force * (1 - dist / radius);
+        M.Body.applyForce(b, b.position, { x: dx / dist * mag, y: dy / dist * mag - mag * 0.4 });
+      }
+    });
+  }
+
+  // ── input ────────────────────────────────────────────────────────────────────
+  onDown(pointer) {
+    if (pointer.y >= MENU_Y) return;  // let zone events handle menu clicks
+
+    // ── 67 box click ─────────────────────────────────────────────────────────
+    if (Math.abs(pointer.x - BOX67_X) < BOX67_SIZE / 2 &&
+        Math.abs(pointer.y - BOX67_Y) < BOX67_SIZE / 2) {
+      this.gun67Active = !this.gun67Active;
+      this.gunIndicator.setVisible(this.gun67Active);
+      return;
+    }
+
+    // ── 67 gun fires portal ───────────────────────────────────────────────────
+    if (this.gun67Active) {
+      this._shootPortal(pointer.x, pointer.y);
+      return;
+    }
+
+    // ── normal drag ───────────────────────────────────────────────────────────
+    const M = this.M, world = this.matter.world.localWorld;
+    const hits = M.Query.point(M.Composite.allBodies(world), { x: pointer.x, y: pointer.y });
+    if (!hits.length || hits[0].isStatic) return;
+    this.dragConstraint = M.Constraint.create({
+      pointA: { x: pointer.x, y: pointer.y },
+      bodyB: hits[0],
+      pointB: { x: pointer.x - hits[0].position.x, y: pointer.y - hits[0].position.y },
+      stiffness: 0.15, damping: 0.1
+    });
+    M.World.add(world, this.dragConstraint);
+  }
+
+  onMove(pointer) {
+    if (!this.dragConstraint) return;
+    this.dragConstraint.pointA.x = pointer.x;
+    this.dragConstraint.pointA.y = pointer.y;
+  }
+
+  onUp() {
+    if (!this.dragConstraint) return;
+    this.M.World.remove(this.matter.world.localWorld, this.dragConstraint);
+    this.dragConstraint = null;
+  }
+
+  // ── update ───────────────────────────────────────────────────────────────────
+  update() {
+    const now = this.time.now;
+
+    // TNT timers
+    for (let i = this.tnts.length - 1; i >= 0; i--) {
+      if (now - this.tnts[i].born >= 2500) {
+        const { x, y } = this.tnts[i].body.position;
+        this.M.World.remove(this.matter.world.localWorld, this.tnts[i].body);
+        this.tnts.splice(i, 1);
+        this._explode(x, y, 120, 0.065);
+      }
+    }
+    // Rocket timers (2s)
+    for (let i = this.rockets.length - 1; i >= 0; i--) {
+      if (now - this.rockets[i].born >= 2000) {
+        const { x, y } = this.rockets[i].body.position;
+        this.M.World.remove(this.matter.world.localWorld, this.rockets[i].body);
+        this.rockets.splice(i, 1);
+        this._explode(x, y, 90, 0.05);
+      }
+    }
+
+    this.balls.forEach(b => { b.angle += b.body.velocity.x * 0.03; });
+
+    // Portal shots → become portals when arrived
+    this._updatePortalShots(now);
+    // Teleport bodies touching portals
+    this._updatePortalTeleport();
+
+    // ── draw ──────────────────────────────────────────────────────────────────
+    const g = this.gfx;
+    g.clear();
+    this._drawBigBalls(g);
+    this._drawCrates(g);
+    this._drawBats(g);
+    this._drawBalls(g);
+    this._drawRagdolls(g);
+    this._drawTNTs(g, now);
+    this._drawRockets(g, now);
+
+    // Explosions
+    const fx = this.fxGfx;
+    fx.clear();
+    this.explosions = this.explosions.filter(e => {
+      const age = now - e.born;
+      if (age > 400) return false;
+      const t = age / 400;
+      fx.fillStyle(t < 0.33 ? 0xff6600 : t < 0.66 ? 0xffaa00 : 0xffffff, 1 - t);
+      fx.fillCircle(e.x, e.y, 20 + t * 110);
+      return true;
+    });
+
+    // Portals + 67 box
+    const pg = this.portalGfx;
+    pg.clear();
+    this._draw67Box(pg, now);
+    this._drawPortals(pg, now);
+
+    // Hover highlight
+    const mh = this.menuHovGfx;
+    mh.clear();
+    if (this.hoveredBtn >= 0) {
+      const bx = MENU_START_X + this.hoveredBtn * (BTN_W + BTN_GAP);
+      const by = MENU_Y + 1;
+      mh.fillStyle(0xffffff, 0.12);
+      mh.fillRect(bx, by, BTN_W, BTN_H);
+      mh.lineStyle(2, 0x88aaff);
+      mh.strokeRect(bx, by, BTN_W, BTN_H);
+    }
+  }
+
+  // ── draw helpers ─────────────────────────────────────────────────────────────
+  _drawBalls(g) {
+    this.balls.forEach(({ body, angle }) => {
+      if (!body?.position) return;
+      const { x, y } = body.position, r = 14;
+      g.fillStyle(0xffffff); g.fillCircle(x, y, r);
+      g.fillStyle(0x111111);
+      for (let i = 0; i < 5; i++) {
+        const a = angle + i / 5 * Math.PI * 2;
+        g.fillRect(x + Math.cos(a) * 7 - 3, y + Math.sin(a) * 7 - 3, 6, 6);
+      }
+      g.fillStyle(0xffffff, 0.7); g.fillCircle(x - 4, y - 4, 4);
+      g.lineStyle(1.5, 0x222222); g.strokeCircle(x, y, r);
+    });
+  }
+
+  _drawBigBalls(g) {
+    this.bigballs.forEach(({ body }) => {
+      if (!body?.position) return;
+      const { x, y } = body.position;
+      g.fillStyle(0x252525); g.fillCircle(x, y, 26);
+      g.fillStyle(0x555555); g.fillCircle(x - 7, y - 7, 8);
+      g.lineStyle(2, 0x111111); g.strokeCircle(x, y, 26);
+    });
+  }
+
+  _drawCrates(g) {
+    this.crates.forEach(({ body }) => {
+      if (!body?.position) return;
+      const { x, y } = body.position, a = body.angle;
+      const hw = 19, hh = 19, cos = Math.cos(a), sin = Math.sin(a);
+      const corners = [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].map(([rx,ry]) => ({
+        x: x + rx * cos - ry * sin, y: y + rx * sin + ry * cos
+      }));
+      g.fillStyle(0x8B5e3c); g.fillPoints(corners, true);
+      g.lineStyle(1.5, 0x5a3a1a, 0.8);
+      g.lineBetween(corners[0].x, corners[0].y, corners[2].x, corners[2].y);
+      g.lineBetween(corners[1].x, corners[1].y, corners[3].x, corners[3].y);
+      g.lineStyle(2, 0x5a3a1a); g.strokePoints(corners, true);
+    });
+  }
+
+  _drawBats(g) {
+    this.bats.forEach(({ body }) => {
+      if (!body?.position) return;
+      const { x, y } = body.position, a = body.angle;
+      const hw = 4, hh = 26, cos = Math.cos(a), sin = Math.sin(a);
+      const pts = [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].map(([rx,ry]) => ({
+        x: x + rx * cos - ry * sin, y: y + rx * sin + ry * cos
+      }));
+      g.fillStyle(0x7a4f2a); g.fillPoints(pts, true);
+      // Wide end (handle top)
+      const wide = [
+        { x: x + (-hw-2)*cos - (-hh)*sin,   y: y + (-hw-2)*sin + (-hh)*cos },
+        { x: x + (hw+2)*cos  - (-hh)*sin,   y: y + (hw+2)*sin  + (-hh)*cos },
+        { x: x + hw*cos      - (-hh+10)*sin, y: y + hw*sin      + (-hh+10)*cos },
+        { x: x + (-hw)*cos   - (-hh+10)*sin, y: y + (-hw)*sin   + (-hh+10)*cos },
+      ];
+      g.fillStyle(0xaa7744); g.fillPoints(wide, true);
+      g.lineStyle(1.5, 0x3a2010); g.strokePoints(pts, true);
+    });
+  }
+
+  _drawRagdolls(g) {
+    this.ragdolls.forEach(({ bodies, type, color }) => {
+      const [head, torso, lUA, rUA, lLA, rLA, lUL, rUL, lLL, rLL] = bodies;
+      if (!torso?.position) return;
+      const p = b => b.position;
+
+      g.lineStyle(5, color);
+      [[torso,lUA],[torso,rUA],[lUA,lLA],[rUA,rLA],
+       [torso,lUL],[torso,rUL],[lUL,lLL],[rUL,rLL]
+      ].forEach(([a,b]) => g.lineBetween(p(a).x, p(a).y, p(b).x, p(b).y));
+
+      g.fillStyle(color); g.fillRect(p(torso).x - 7, p(torso).y - 14, 14, 28);
+
+      const hx = p(head).x, hy = p(head).y;
+      g.fillStyle(color); g.fillCircle(hx, hy, 13);
+      g.lineStyle(2, 0x000000, 0.5); g.strokeCircle(hx, hy, 13);
+      g.fillStyle(0x000000);
+      if (type === 'creeper') {
+        g.fillRect(hx-7, hy-4, 5, 5); g.fillRect(hx+2, hy-4, 5, 5);
+        g.fillRect(hx-3, hy+3, 6, 3); g.fillRect(hx-5, hy+6, 4, 3); g.fillRect(hx+1, hy+6, 4, 3);
+      } else {
+        g.fillStyle(0x3b5998);
+        g.fillCircle(hx-4, hy-2, 3); g.fillCircle(hx+4, hy-2, 3);
+        g.fillStyle(0x8B5e3c); g.fillRect(hx-4, hy+4, 8, 2);
+      }
+    });
+  }
+
+  _drawTNTs(g, now) {
+    this.tnts.forEach(({ body, born }) => {
+      if (!body?.position) return;
+      const age = now - born, rem = 2500 - age;
+      const fi = rem < 400 ? 80 : rem < 800 ? 150 : 300;
+      if (rem < 800 && Math.floor(age / fi) % 2 === 1) return;
+      const { x, y } = body.position, sz = 28;
+      g.fillStyle(0xcc2222); g.fillRect(x-sz/2, y-sz/2, sz, sz);
+      g.fillStyle(0xffffff); g.fillRect(x-sz/2, y-5, sz, 10);
+      g.fillStyle(0xcc2222);
+      g.fillRect(x-12,y-3,6,2); g.fillRect(x-10,y-3,2,6);
+      g.fillRect(x-3,y-3,2,6); g.fillRect(x+1,y-3,2,6); g.fillRect(x-1,y-1,2,2);
+      g.fillRect(x+5,y-3,6,2); g.fillRect(x+7,y-3,2,6);
+      g.lineStyle(2, 0x880000); g.strokeRect(x-sz/2, y-sz/2, sz, sz);
+    });
+  }
+
+  _drawRockets(g, now) {
+    this.rockets.forEach(({ body, born }) => {
+      if (!body?.position) return;
+      const { x, y } = body.position;
+      const vx = body.velocity.x, vy = body.velocity.y;
+      const a = Math.atan2(vy, vx) + Math.PI / 2;
+      const cos = Math.cos(a), sin = Math.sin(a);
+      const age = now - born;
+
+      // Trail
+      const tx = x - cos * 22, ty = y - sin * 22;
+      g.lineStyle(5, 0xff6600, 0.6); g.lineBetween(x, y, tx, ty);
+      g.lineStyle(3, 0xffcc00, 0.4); g.lineBetween(x, y, tx + (Math.random()-0.5)*5, ty + (Math.random()-0.5)*5);
+
+      // Body (triangle)
+      const tip   = { x: x + cos * 12, y: y + sin * 12 };
+      const bl    = { x: x + Math.cos(a+2.5)*6, y: y + Math.sin(a+2.5)*6 };
+      const br    = { x: x + Math.cos(a-2.5)*6, y: y + Math.sin(a-2.5)*6 };
+      g.fillStyle(0xcc4400); g.fillTriangle(tip.x, tip.y, bl.x, bl.y, br.x, br.y);
+      g.fillStyle(0xff6600); g.fillTriangle(x - cos*2, y - sin*2, bl.x, bl.y, br.x, br.y);
+
+      // Flash near end
+      if (2000 - age < 500 && Math.floor(age / 100) % 2 === 0) {
+        g.fillStyle(0xffffff, 0.4); g.fillCircle(x, y, 12);
+      }
+    });
+  }
+
+  // ── 67 box ───────────────────────────────────────────────────────────────────
+  _build67Box() {
+    // Static visual — no physics body needed
+    // "67" tiled all over it using overlapping text objects
+    const sz = BOX67_SIZE;
+    const x = BOX67_X, y = BOX67_Y;
+    // Tile "67" across the face with Phaser Text
+    const positions = [
+      [-12, -13], [6, -13],
+      [-14,  -2], [4,  -2],
+      [-12,   9], [6,   9],
+    ];
+    positions.forEach(([ox, oy]) => {
+      this.add.text(x + ox, y + oy, '67', {
+        fontSize: '9px', fontFamily: 'monospace', color: '#ffdd00'
+      }).setDepth(13);
+    });
+
+    // Gun indicator text at top of screen
+    this.gunIndicator = this.add.text(W / 2, 28,
+      '67 GUN ACTIVE — click to shoot a portal!',
+      { fontSize: '13px', fontFamily: 'monospace',
+        color: '#dd44ff', stroke: '#000000', strokeThickness: 4 }
+    ).setOrigin(0.5, 0).setDepth(15).setVisible(false);
+  }
+
+  _draw67Box(g, now) {
+    const x = BOX67_X, y = BOX67_Y, sz = BOX67_SIZE;
+    const pulse = 0.75 + 0.25 * Math.sin(now * 0.004);
+
+    // Outer glow when gun active
+    if (this.gun67Active) {
+      g.fillStyle(0xcc00ff, 0.2 * pulse);
+      g.fillRect(x - sz / 2 - 8, y - sz / 2 - 8, sz + 16, sz + 16);
+    }
+
+    // Box body
+    g.fillStyle(this.gun67Active ? 0x9900dd : 0x550099);
+    g.fillRect(x - sz / 2, y - sz / 2, sz, sz);
+
+    // Bright border (gold)
+    g.lineStyle(2, this.gun67Active ? 0xff88ff : 0xffdd00);
+    g.strokeRect(x - sz / 2, y - sz / 2, sz, sz);
+
+    // Inner border
+    g.lineStyle(1, 0xffffff, 0.3);
+    g.strokeRect(x - sz / 2 + 3, y - sz / 2 + 3, sz - 6, sz - 6);
+
+    // Crosshair highlight on active gun
+    if (this.gun67Active) {
+      const ptr = this.input.activePointer;
+      g.lineStyle(1.5, 0xdd44ff, 0.9);
+      g.lineBetween(ptr.x - 18, ptr.y, ptr.x + 18, ptr.y);
+      g.lineBetween(ptr.x, ptr.y - 18, ptr.x, ptr.y + 18);
+      g.lineStyle(1.5, 0xdd44ff, 0.5);
+      g.strokeCircle(ptr.x, ptr.y, 10);
+    }
+  }
+
+  // ── portals ──────────────────────────────────────────────────────────────────
+  _shootPortal(destX, destY) {
+    const color = this.portals.length === 0 ? 0xff6600 : 0x0088ff;
+    this.portalShots.push({
+      x1: BOX67_X, y1: BOX67_Y,
+      destX, destY,
+      color, born: this.time.now
+    });
+  }
+
+  _updatePortalShots(now) {
+    this.portalShots = this.portalShots.filter(shot => {
+      const age = now - shot.born;
+      if (age >= 180) {
+        // Arrive: add (or replace oldest) portal
+        if (this.portals.length >= 2) this.portals.shift();
+        this.portals.push({ x: shot.destX, y: shot.destY, color: shot.color, born: now, flashAt: 0 });
+        return false;
+      }
+      return true;
+    });
+  }
+
+  _updatePortalTeleport() {
+    if (this.portals.length < 2) return;
+    const [p1, p2] = this.portals;
+    const RADIUS = 32;
+    const M = this.M;
+    M.Composite.allBodies(this.matter.world.localWorld).forEach(b => {
+      if (b.isStatic || b.label === 'tnt' || b.label === 'rocket') return;
+      if (b._portalCD && this.time.now < b._portalCD) return;
+      const d1 = Math.hypot(b.position.x - p1.x, b.position.y - p1.y);
+      const d2 = Math.hypot(b.position.x - p2.x, b.position.y - p2.y);
+      if (d1 < RADIUS) {
+        M.Body.setPosition(b, { x: p2.x, y: p2.y - 35 });
+        M.Body.setVelocity(b, { x: b.velocity.x * 0.8, y: -Math.abs(b.velocity.y) - 2 });
+        b._portalCD = this.time.now + 700;
+        p1.flashAt = p2.flashAt = this.time.now;
+      } else if (d2 < RADIUS) {
+        M.Body.setPosition(b, { x: p1.x, y: p1.y - 35 });
+        M.Body.setVelocity(b, { x: b.velocity.x * 0.8, y: -Math.abs(b.velocity.y) - 2 });
+        b._portalCD = this.time.now + 700;
+        p1.flashAt = p2.flashAt = this.time.now;
+      }
+    });
+  }
+
+  _drawPortals(g, now) {
+    // Draw portal shots (moving dot)
+    this.portalShots.forEach(shot => {
+      const t = (now - shot.born) / 180;
+      const px = shot.x1 + (shot.destX - shot.x1) * t;
+      const py = shot.y1 + (shot.destY - shot.y1) * t;
+      g.fillStyle(shot.color, 0.9); g.fillCircle(px, py, 7);
+      g.fillStyle(0xffffff, 0.6); g.fillCircle(px, py, 3);
+      // Trail
+      g.lineStyle(3, shot.color, 0.4);
+      g.lineBetween(shot.x1, shot.y1, px, py);
+    });
+
+    // Draw placed portals
+    this.portals.forEach(p => {
+      const age = now - p.born;
+      const pulse = 0.8 + 0.2 * Math.sin(age * 0.006);
+      const flashT = p.flashAt ? Math.max(0, 1 - (now - p.flashAt) / 250) : 0;
+
+      // Outer glow
+      g.fillStyle(p.color, 0.18 * pulse);
+      g.fillEllipse(p.x, p.y, 64, 110);
+
+      // Main portal oval
+      g.fillStyle(p.color, 0.7 * pulse);
+      g.fillEllipse(p.x, p.y, 42, 82);
+
+      // Bright center
+      g.fillStyle(0xffffff, (0.3 + flashT * 0.5) * pulse);
+      g.fillEllipse(p.x, p.y, 24, 58);
+
+      // Border ring
+      g.lineStyle(3, p.color);
+      g.strokeEllipse(p.x, p.y, 42, 82);
+      g.lineStyle(1, 0xffffff, 0.4);
+      g.strokeEllipse(p.x, p.y, 30, 66);
+
+      // Flash burst
+      if (flashT > 0) {
+        g.fillStyle(0xffffff, flashT * 0.6);
+        g.fillEllipse(p.x, p.y, 64 * flashT, 110 * flashT);
+      }
+    });
+  }
+}
+
+// ─── boot ─────────────────────────────────────────────────────────────────────
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: W, height: H,
+  backgroundColor: '#87ceeb',
+  physics: { default: 'matter', matter: { gravity: { y: 2 }, debug: false } },
+  scene: SandboxScene
+});
+</script>
+</body>
+</html>
