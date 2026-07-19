@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Food Delivery Dash</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #1a1a2e; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+const W = 800, H = 600;
+
+// ---------- helpers ----------
+function makeCityBackground(scene) {
+  const g = scene.add.graphics();
+  // grass base
+  g.fillStyle(0x3fa34d, 1);
+  g.fillRect(0, 0, W, H);
+  // draw a grid of grey roads
+  g.fillStyle(0x4a4a4a, 1);
+  const roadW = 70;
+  for (let x = 60; x < W; x += 180) g.fillRect(x, 0, roadW, H);
+  for (let y = 60; y < H; y += 180) g.fillRect(0, y, W, roadW);
+  // dashed yellow center lines
+  g.fillStyle(0xffe066, 1);
+  for (let x = 60; x < W; x += 180) {
+    for (let y = 0; y < H; y += 40) g.fillRect(x + roadW / 2 - 2, y + 8, 4, 20);
+  }
+  for (let y = 60; y < H; y += 180) {
+    for (let x = 0; x < W; x += 40) g.fillRect(x + 8, y + roadW / 2 - 2, 20, 4);
+  }
+  // little buildings on the grass blocks
+  const colors = [0xe76f51, 0xf4a261, 0x2a9d8f, 0xe9c46a, 0x8ecae6, 0xbc6c25];
+  for (let bx = 145; bx < W; bx += 180) {
+    for (let by = 145; by < H; by += 180) {
+      const c = colors[(bx + by) % colors.length];
+      g.fillStyle(c, 1);
+      g.fillRect(bx - 30, by - 30, 60, 60);
+      g.fillStyle(0x000000, 0.15);
+      g.fillRect(bx - 30, by + 18, 60, 12);
+    }
+  }
+}
+
+// ---------- Title ----------
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+  create() {
+    makeCityBackground(this);
+    const box = this.add.graphics();
+    box.fillStyle(0x000000, 0.55);
+    box.fillRoundedRect(120, 130, 560, 340, 24);
+
+    this.add.text(W / 2, 195, '🍔 FOOD DELIVERY DASH 🚗', {
+      fontSize: '34px', fontFamily: 'Arial', color: '#ffe066', fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    this.add.text(W / 2, 275,
+      'Drive to the glowing 🍔 to grab the food,\nthen deliver it to the hungry 🏠 customer!\n\nArrow Keys to drive  •  Beat the clock for tips!',
+      { fontSize: '18px', fontFamily: 'Arial', color: '#ffffff', align: 'center', lineSpacing: 8 }
+    ).setOrigin(0.5);
+
+    const prompt = this.add.text(W / 2, 415, 'Press SPACE to Start', {
+      fontSize: '26px', fontFamily: 'Arial', color: '#7cf28a', fontStyle: 'bold'
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: prompt, alpha: 0.2, duration: 600, yoyo: true, repeat: -1 });
+
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+  }
+}
+
+// ---------- Game ----------
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+
+  create() {
+    makeCityBackground(this);
+
+    // car
+    this.car = this.add.container(400, 300);
+    const body = this.add.graphics();
+    body.fillStyle(0xff3b3b, 1);
+    body.fillRoundedRect(-16, -26, 32, 52, 8);
+    body.fillStyle(0x9be7ff, 1);
+    body.fillRoundedRect(-12, -18, 24, 16, 4); // windshield
+    body.fillStyle(0x222222, 1);
+    body.fillRect(-18, -20, 5, 12); // wheels
+    body.fillRect(13, -20, 5, 12);
+    body.fillRect(-18, 8, 5, 12);
+    body.fillRect(13, 8, 5, 12);
+    this.car.add(body);
+    this.physics.add.existing(this.car);
+    this.car.body.setSize(36, 52);
+    this.car.body.setOffset(-18, -26);
+    this.car.body.setDamping(true);
+    this.car.body.setDrag(0.85);
+    this.car.body.setMaxVelocity(320);
+    this.car.body.setCollideWorldBounds(true);
+
+    // food indicator carried on the car
+    this.foodBadge = this.add.text(0, 0, '🍔', { fontSize: '22px' }).setOrigin(0.5).setVisible(false);
+
+    // pickup + dropoff markers
+    this.pickup = this.add.container(0, 0);
+    const pg = this.add.circle(0, 0, 26, 0xffcc00, 0.35);
+    this.pickupEmoji = this.add.text(0, 0, '🍔', { fontSize: '30px' }).setOrigin(0.5);
+    this.pickup.add([pg, this.pickupEmoji]);
+    this.tweens.add({ targets: pg, scale: 1.3, alpha: 0.15, duration: 700, yoyo: true, repeat: -1 });
+
+    this.dropoff = this.add.container(0, 0).setVisible(false);
+    const dg = this.add.circle(0, 0, 26, 0x00d0ff, 0.35);
+    this.dropEmoji = this.add.text(0, 0, '🏠', { fontSize: '30px' }).setOrigin(0.5);
+    this.dropoff.add([dg, this.dropEmoji]);
+    this.tweens.add({ targets: dg, scale: 1.3, alpha: 0.15, duration: 700, yoyo: true, repeat: -1 });
+
+    this.hasFood = false;
+    this.money = 0;
+    this.timeLeft = 60;
+
+    this.placePickup();
+
+    // HUD
+    this.moneyText = this.add.text(14, 12, '💵 $0', {
+      fontSize: '26px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: 4
+    });
+    this.timeText = this.add.text(W - 14, 12, '⏱ 60', {
+      fontSize: '26px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: 4
+    }).setOrigin(1, 0);
+    this.hintText = this.add.text(W / 2, 12, 'Grab the 🍔!', {
+      fontSize: '20px', fontFamily: 'Arial', color: '#ffe066', fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: 4
+    }).setOrigin(0.5, 0);
+
+    this.cursors = this.input.keyboard.createCursorKeys();
+
+    // countdown timer
+    this.timeEvent = this.time.addEvent({
+      delay: 1000, loop: true, callback: () => {
+        this.timeLeft--;
+        this.timeText.setText('⏱ ' + this.timeLeft);
+        if (this.timeLeft <= 10) this.timeText.setColor('#ff6b6b');
+        if (this.timeLeft <= 0) this.endGame();
+      }
+    });
+  }
+
+  randSpot() {
+    // put spots roughly on road intersections / block centers
+    const xs = [145, 325, 505, 685];
+    const ys = [145, 325, 505];
+    return { x: Phaser.Utils.Array.GetRandom(xs), y: Phaser.Utils.Array.GetRandom(ys) };
+  }
+
+  placePickup() {
+    const s = this.randSpot();
+    this.pickup.setPosition(s.x, s.y).setVisible(true);
+    this.dropoff.setVisible(false);
+    this.hasFood = false;
+    this.foodBadge.setVisible(false);
+    if (this.hintText) this.hintText.setText('Grab the 🍔!');
+  }
+
+  placeDropoff() {
+    let s;
+    do { s = this.randSpot(); } while (Math.abs(s.x - this.pickup.x) < 30 && Math.abs(s.y - this.pickup.y) < 30);
+    this.dropoff.setPosition(s.x, s.y).setVisible(true);
+    this.pickup.setVisible(false);
+    this.hasFood = true;
+    this.foodBadge.setVisible(true);
+    this.hintText.setText('Deliver to the 🏠!');
+  }
+
+  update() {
+    if (this.timeLeft <= 0) return;
+    const b = this.car.body;
+    const accel = 620;
+    b.setAcceleration(0, 0);
+    if (this.cursors.left.isDown) b.setAccelerationX(-accel);
+    else if (this.cursors.right.isDown) b.setAccelerationX(accel);
+    if (this.cursors.up.isDown) b.setAccelerationY(-accel);
+    else if (this.cursors.down.isDown) b.setAccelerationY(accel);
+
+    // point the car toward its movement direction
+    if (Math.abs(b.velocity.x) + Math.abs(b.velocity.y) > 20) {
+      this.car.rotation = Math.atan2(b.velocity.y, b.velocity.x) + Math.PI / 2;
+    }
+
+    // keep food badge on car
+    this.foodBadge.setPosition(this.car.x, this.car.y);
+
+    // pickup check
+    if (!this.hasFood && this.pickup.visible) {
+      if (Phaser.Math.Distance.Between(this.car.x, this.car.y, this.pickup.x, this.pickup.y) < 40) {
+        this.placeDropoff();
+        this.flash('🍔 Got it!', '#ffe066');
+      }
+    }
+    // dropoff check
+    if (this.hasFood && this.dropoff.visible) {
+      if (Phaser.Math.Distance.Between(this.car.x, this.car.y, this.dropoff.x, this.dropoff.y) < 40) {
+        const tip = 5 + Math.floor(this.timeLeft / 6); // faster = bigger tip
+        this.money += tip;
+        this.moneyText.setText('💵 $' + this.money);
+        this.timeLeft += 8; // reward: more time
+        this.timeText.setText('⏱ ' + this.timeLeft);
+        if (this.timeLeft > 10) this.timeText.setColor('#ffffff');
+        this.flash('+$' + tip + ' & +8s!', '#7cf28a');
+        this.placePickup();
+      }
+    }
+  }
+
+  flash(msg, color) {
+    const t = this.add.text(this.car.x, this.car.y - 44, msg, {
+      fontSize: '22px', fontFamily: 'Arial', color: color, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: 4
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: t, y: t.y - 40, alpha: 0, duration: 900, onComplete: () => t.destroy() });
+  }
+
+  endGame() {
+    this.timeEvent.remove();
+    this.scene.start('GameOverScene', { money: this.money });
+  }
+}
+
+// ---------- Game Over ----------
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  create(data) {
+    makeCityBackground(this);
+    const box = this.add.graphics();
+    box.fillStyle(0x000000, 0.6);
+    box.fillRoundedRect(160, 160, 480, 280, 24);
+
+    this.add.text(W / 2, 220, "Time's Up! ⏱", {
+      fontSize: '36px', fontFamily: 'Arial', color: '#ff6b6b', fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    this.add.text(W / 2, 295, 'You earned', {
+      fontSize: '20px', fontFamily: 'Arial', color: '#ffffff'
+    }).setOrigin(0.5);
+    this.add.text(W / 2, 335, '💵 $' + data.money, {
+      fontSize: '48px', fontFamily: 'Arial', color: '#7cf28a', fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    const prompt = this.add.text(W / 2, 405, 'Press SPACE to Play Again', {
+      fontSize: '22px', fontFamily: 'Arial', color: '#ffe066', fontStyle: 'bold'
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: prompt, alpha: 0.2, duration: 600, yoyo: true, repeat: -1 });
+
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+  }
+}
+
+const config = {
+  type: Phaser.AUTO,
+  width: W,
+  height: H,
+  physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+  scene: [TitleScene, GameScene, GameOverScene]
+};
+
+const game = new Phaser.Game(config);
+</script>
+</body>
+</html>
