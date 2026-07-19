@@ -322,7 +322,7 @@
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <button class="account-btn" style="background:linear-gradient(180deg,#4fd0ff,#1e93d6);box-shadow:0 4px 0 #146a9c" onclick="openCreatorHub()">🎨 Creator Hub</button>
-      <button class="account-btn" onclick="openAccount()">Create an account to make games</button>
+      <button class="account-btn" id="accountBtn" onclick="openAccount()">Create an account to make games</button>
     </div>
   </div>
 
@@ -523,7 +523,7 @@ function getAccount() {
 }
 function refreshAccountUI() {
   const acct = getAccount();
-  const btn = document.querySelector('.account-btn');
+  const btn = document.getElementById('accountBtn');
   if (acct) { btn.textContent = '👤 ' + acct.username; }
   else { btn.textContent = 'Create an account to make games'; }
 }
