@@ -117,7 +117,7 @@ class GameScene extends Phaser.Scene {
 
     this.hasFood = false;
     this.money = 0;
-    this.timeLeft = 60;
+    this.timeLeft = 15;
 
     this.placePickup();
 
@@ -126,7 +126,7 @@ class GameScene extends Phaser.Scene {
       fontSize: '26px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold',
       stroke: '#000000', strokeThickness: 4
     });
-    this.timeText = this.add.text(W - 14, 12, '⏱ 60', {
+    this.timeText = this.add.text(W - 14, 12, '⏱ 15', {
       fontSize: '26px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold',
       stroke: '#000000', strokeThickness: 4
     }).setOrigin(1, 0);
