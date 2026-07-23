@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Hoop Jumper</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+const W = 800, H = 600;
+const OBS_W = 70;
+const GAP = 180;
+
+// ---------- Ball skins for the shop ----------
+const BALL_SKINS = [
+  {key:'ball_classic', name:'Classic',    style:'classic', price:0},
+  {key:'ball_soccer',  name:'Soccer',     style:'soccer',  price:10},
+  {key:'ball_fire',    name:'Fireball',   style:'fire',    price:25},
+  {key:'ball_gold',    name:'Golden',     style:'gold',    price:45},
+  {key:'ball_galaxy',  name:'Galaxy',     style:'galaxy',  price:70},
+  {key:'ball_beach',   name:'Beach Ball', style:'beach',   price:100},
+];
+function ballByKey(k){ return BALL_SKINS.find(s => s.key === k) || BALL_SKINS[0]; }
+
+// ---------- Save data ----------
+function getCoins(){ return parseInt(localStorage.getItem('hj_coins') || '0', 10); }
+function setCoins(n){ localStorage.setItem('hj_coins', n); }
+function getOwned(){ try { return JSON.parse(localStorage.getItem('hj_owned')) || ['ball_classic']; } catch(e){ return ['ball_classic']; } }
+function setOwned(a){ localStorage.setItem('hj_owned', JSON.stringify(a)); }
+function getSelected(){ return localStorage.getItem('hj_selected') || 'ball_classic'; }
+function setSelected(k){ localStorage.setItem('hj_selected', k); }
+
+// ---------- Draw a ball skin as a texture ----------
+function seams(g, color) {
+  g.lineStyle(2.5, color, 1);
+  g.strokeCircle(18, 18, 18);
+  g.beginPath(); g.moveTo(18, 0); g.lineTo(18, 36); g.strokePath();
+  g.beginPath(); g.moveTo(0, 18); g.lineTo(36, 18); g.strokePath();
+  g.beginPath(); g.arc(18, 18, 18, -1.9, -1.24, false); g.strokePath();
+  g.beginPath(); g.arc(18, 18, 18, 1.24, 1.9, false); g.strokePath();
+}
+function drawBall(g, style) {
+  if (style === 'classic') { g.fillStyle(0xff8c1a,1); g.fillCircle(18,18,18); seams(g, 0x0a0a0a); }
+  else if (style === 'gold') { g.fillStyle(0xffd700,1); g.fillCircle(18,18,18); seams(g, 0x6a4a00); }
+  else if (style === 'fire') {
+    g.fillStyle(0xff3b1a,1); g.fillCircle(18,18,18);
+    g.fillStyle(0xffb020,1); g.fillCircle(18,18,10);
+    g.fillStyle(0xffe14d,1); g.fillCircle(18,18,4);
+    seams(g, 0x5a0f00);
+  }
+  else if (style === 'soccer') {
+    g.fillStyle(0xffffff,1); g.fillCircle(18,18,18);
+    g.lineStyle(2, 0x888888, 1); g.strokeCircle(18,18,18);
+    // central black pentagon + spokes
+    g.fillStyle(0x111111,1);
+    const pts = [];
+    for (let i = 0; i < 5; i++){ const a = -Math.PI/2 + i*2*Math.PI/5; pts.push({x:18+Math.cos(a)*6, y:18+Math.sin(a)*6}); }
+    g.beginPath(); g.moveTo(pts[0].x, pts[0].y); pts.forEach(p=>g.lineTo(p.x,p.y)); g.closePath(); g.fillPath();
+    g.lineStyle(2.5, 0x111111, 1);
+    pts.forEach(p => { const a = Math.atan2(p.y-18, p.x-18); g.beginPath(); g.moveTo(p.x,p.y); g.lineTo(18+Math.cos(a)*18, 18+Math.sin(a)*18); g.strokePath(); });
+  }
+  else if (style === 'galaxy') {
+    g.fillStyle(0x2a1152,1); g.fillCircle(18,18,18);
+    g.fillStyle(0x5a2fb0,0.6); g.fillCircle(13,14,7);
+    const stars = [[10,9],[26,11],[14,25],[27,24],[19,17],[8,18],[22,7]];
+    g.fillStyle(0xffffff,1); stars.forEach(s => g.fillCircle(s[0], s[1], 1.4));
+    g.lineStyle(2, 0x9f7bff, 1); g.strokeCircle(18,18,18);
+  }
+  else if (style === 'beach') {
+    const cols = [0xff3b3b, 0xffde3b, 0x3bc9ff, 0x3bd16f, 0xffffff, 0xff8c1a];
+    for (let i = 0; i < 6; i++){
+      const a0 = i*Math.PI/3, a1 = (i+1)*Math.PI/3;
+      g.fillStyle(cols[i],1); g.beginPath(); g.slice(18,18,18,a0,a1,false); g.fillPath();
+    }
+    g.lineStyle(2, 0xcccccc, 1); g.strokeCircle(18,18,18);
+  }
+}
+function ensureBalls(scene) {
+  BALL_SKINS.forEach(s => {
+    if (!scene.textures.exists(s.key)) {
+      const g = scene.add.graphics();
+      drawBall(g, s.style);
+      g.generateTexture(s.key, 36, 36);
+      g.destroy();
+    }
+  });
+}
+
+function drawCourt(scene) {
+  const g = scene.add.graphics();
+  g.fillGradientStyle(0x1f6fb2, 0x1f6fb2, 0x0c3c66, 0x0c3c66, 1);
+  g.fillRect(0, 0, W, H);
+  g.fillStyle(0xc98a4b, 1); g.fillRect(0, H - 30, W, 30);
+  g.lineStyle(2, 0x9c6a34, 1);
+  for (let i = 0; i < W; i += 40) { g.beginPath(); g.moveTo(i, H - 30); g.lineTo(i, H); g.strokePath(); }
+}
+
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+  create() {
+    drawCourt(this);
+    ensureBalls(this);
+    const sel = getSelected();
+    const ball = this.add.image(W/2, 250, sel).setScale(2.4);
+    this.tweens.add({targets: ball, y: 220, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.inOut'});
+
+    this.add.text(W/2, 90, 'HOOP JUMPER', {font:'bold 58px Arial', color:'#ff8c1a', stroke:'#000', strokeThickness:8}).setOrigin(0.5);
+    this.add.text(W/2, 135, '💰 ' + getCoins() + ' coins', {font:'bold 22px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+    this.add.text(W/2, 350, 'CLICK or SPACE to jump through the hoops! 🏀', {font:'20px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+    const start = this.add.text(W/2, 425, 'Press SPACE to Start', {font:'bold 30px Arial', color:'#fff', stroke:'#000', strokeThickness:5}).setOrigin(0.5);
+    this.tweens.add({targets: start, alpha: 0.2, duration: 600, yoyo: true, repeat: -1});
+    this.add.text(W/2, 485, 'Press S for the Ball Shop 🛒', {font:'bold 24px Arial', color:'#ffde4d', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+    this.input.keyboard.once('keydown-S', () => this.scene.start('ShopScene'));
+    this.input.once('pointerdown', () => this.scene.start('GameScene'));
+  }
+}
+
+class ShopScene extends Phaser.Scene {
+  constructor() { super('ShopScene'); }
+  create() {
+    drawCourt(this);
+    ensureBalls(this);
+    this.index = 0;
+
+    this.add.text(W/2, 55, 'BALL SHOP 🛒', {font:'bold 48px Arial', color:'#ffde4d', stroke:'#000', strokeThickness:7}).setOrigin(0.5);
+    this.coinText = this.add.text(W/2, 105, '💰 ' + getCoins() + ' coins', {font:'bold 26px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+
+    const xs = [80, 215, 350, 485, 620, 730];
+    this.cards = [];
+    BALL_SKINS.forEach((s, i) => {
+      const x = xs[i], y = 240;
+      const img = this.add.image(x, y, s.key).setScale(2.1);
+      const name = this.add.text(x, y + 48, s.name, {font:'bold 15px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+      const status = this.add.text(x, y + 74, '', {font:'bold 15px Arial', color:'#fff', stroke:'#000', strokeThickness:3}).setOrigin(0.5);
+      const box = this.add.rectangle(x, y + 10, 118, 165).setStrokeStyle(4, 0xffde4d, 0);
+      img.setInteractive(); img.on('pointerdown', () => { this.index = i; this.choose(); });
+      this.cards.push({img, name, status, box, skin: s});
+    });
+
+    this.msg = this.add.text(W/2, 390, '', {font:'bold 22px Arial', color:'#ffde4d', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+    this.add.text(W/2, 460, '← →  to pick     SPACE to buy / use', {font:'20px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+    this.add.text(W/2, 495, 'Press B to go back', {font:'20px Arial', color:'#fff', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+
+    this.input.keyboard.on('keydown-LEFT',  () => { this.index = (this.index + BALL_SKINS.length - 1) % BALL_SKINS.length; this.refresh(); });
+    this.input.keyboard.on('keydown-RIGHT', () => { this.index = (this.index + 1) % BALL_SKINS.length; this.refresh(); });
+    this.input.keyboard.on('keydown-SPACE', () => this.choose());
+    this.input.keyboard.on('keydown-B', () => this.scene.start('TitleScene'));
+
+    this.refresh();
+  }
+
+  choose() {
+    const s = BALL_SKINS[this.index];
+    const owned = getOwned();
+    if (owned.includes(s.key)) { setSelected(s.key); this.msg.setText('Now using ' + s.name + '!'); }
+    else if (getCoins() >= s.price) {
+      setCoins(getCoins() - s.price); owned.push(s.key); setOwned(owned); setSelected(s.key);
+      this.msg.setText('Bought ' + s.name + '! 🎉');
+    } else { this.msg.setText('Not enough coins for ' + s.name + '!'); }
+    this.coinText.setText('💰 ' + getCoins() + ' coins');
+    this.refresh();
+  }
+
+  refresh() {
+    const owned = getOwned(), selected = getSelected();
+    this.cards.forEach((c, i) => {
+      const s = c.skin;
+      if (selected === s.key) { c.status.setText('USING'); c.status.setColor('#7CFC00'); }
+      else if (owned.includes(s.key)) { c.status.setText('Owned'); c.status.setColor('#9fd8ff'); }
+      else { c.status.setText('💰 ' + s.price); c.status.setColor('#ffde4d'); }
+      c.box.setStrokeStyle(4, 0xffde4d, i === this.index ? 1 : 0);
+      c.img.setScale(i === this.index ? 2.6 : 2.1);
+    });
+  }
+}
+
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+  create() {
+    drawCourt(this);
+    ensureBalls(this);
+
+    this.ball = this.physics.add.image(220, H/2, getSelected());
+    this.ball.setGravityY(950);
+    this.ball.body.setCircle(18);
+
+    this.obstacles = [];
+    this.obsGfx = this.add.graphics();
+    this.score = 0;
+    this.speed = 180;
+    this.alive = true;
+
+    this.scoreText = this.add.text(W/2, 40, '0', {font:'bold 48px Arial', color:'#fff', stroke:'#000', strokeThickness:6}).setOrigin(0.5).setDepth(10);
+
+    const flap = () => { if (this.alive) this.ball.setVelocityY(-340); };
+    this.input.on('pointerdown', flap);
+    this.input.keyboard.on('keydown-SPACE', flap);
+
+    this.spawnObstacle();
+    this.time.addEvent({delay: 1500, loop: true, callback: () => { if (this.alive) this.spawnObstacle(); }});
+  }
+
+  spawnObstacle() {
+    const gapY = Phaser.Math.Between(160, H - 190);
+    this.obstacles.push({ x: W + OBS_W, gapY, scored: false });
+  }
+
+  update(time, delta) {
+    if (!this.alive) return;
+    const dx = this.speed * (delta / 1000);
+    this.speed = Math.min(340, this.speed + delta * 0.004);
+
+    const ball = this.ball, r = 18;
+    this.obstacles.forEach(o => o.x -= dx);
+    this.obstacles = this.obstacles.filter(o => o.x > -OBS_W - 20);
+
+    const g = this.obsGfx;
+    g.clear();
+    for (const o of this.obstacles) {
+      const topBottom = o.gapY - GAP/2, botTop = o.gapY + GAP/2;
+      const left = o.x - OBS_W/2, w = OBS_W;
+      g.fillStyle(0x14324f, 1);
+      g.fillRoundedRect(left, 0, w, topBottom, 8);
+      g.fillRoundedRect(left, botTop, w, H - botTop, 8);
+      g.fillStyle(0xff8c1a, 1);
+      g.fillRect(left - 6, topBottom - 8, w + 12, 8);
+      g.fillRect(left - 6, botTop, w + 12, 8);
+      g.lineStyle(2, 0xffffff, 0.85);
+      for (let i = 0; i <= 4; i++) { const nx = left + (w * i / 4); g.beginPath(); g.moveTo(nx, topBottom); g.lineTo(o.x, topBottom + 26); g.strokePath(); }
+
+      if (!o.scored && o.x < ball.x) { o.scored = true; this.score++; this.scoreText.setText(this.score); }
+
+      const withinX = (ball.x + r > left) && (ball.x - r < left + w);
+      if (withinX && (ball.y - r < topBottom || ball.y + r > botTop)) return this.gameOver();
+    }
+
+    if (ball.y + r > H - 30 || ball.y - r < 0) this.gameOver();
+  }
+
+  gameOver() {
+    if (!this.alive) return;
+    this.alive = false;
+    this.physics.pause();
+    setCoins(getCoins() + this.score);
+    this.registry.set('score', this.score);
+    this.registry.set('earned', this.score);
+    this.scene.start('GameOverScene');
+  }
+}
+
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  create() {
+    drawCourt(this);
+    const score = this.registry.get('score') || 0;
+    const earned = this.registry.get('earned') || 0;
+    const best = Math.max(score, parseInt(localStorage.getItem('hj_best') || '0', 10));
+    localStorage.setItem('hj_best', best);
+
+    this.add.text(W/2, 120, 'GAME OVER', {font:'bold 60px Arial', color:'#ff8c1a', stroke:'#000', strokeThickness:8}).setOrigin(0.5);
+    this.add.text(W/2, 215, 'Baskets: ' + score, {font:'bold 40px Arial', color:'#fff', stroke:'#000', strokeThickness:5}).setOrigin(0.5);
+    this.add.text(W/2, 268, 'Best: ' + best + ' 🏀', {font:'bold 26px Arial', color:'#ffde4d', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+    this.add.text(W/2, 308, '💰 +' + earned + ' coins   (total: ' + getCoins() + ')', {font:'bold 24px Arial', color:'#ffde4d', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+    const again = this.add.text(W/2, 400, 'Press SPACE to Play Again', {font:'bold 30px Arial', color:'#fff', stroke:'#000', strokeThickness:5}).setOrigin(0.5);
+    this.tweens.add({targets: again, alpha: 0.2, duration: 600, yoyo: true, repeat: -1});
+    this.add.text(W/2, 455, 'Press S for the Ball Shop 🛒', {font:'bold 24px Arial', color:'#ffde4d', stroke:'#000', strokeThickness:4}).setOrigin(0.5);
+
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+    this.input.keyboard.once('keydown-S', () => this.scene.start('ShopScene'));
+    this.input.once('pointerdown', () => this.scene.start('GameScene'));
+  }
+}
+
+const config = {
+  type: Phaser.AUTO,
+  width: W,
+  height: H,
+  physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+  scene: [TitleScene, GameScene, ShopScene, GameOverScene]
+};
+
+const game = new Phaser.Game(config);
+</script>
+</body>
+</html>
