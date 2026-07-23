@@ -205,10 +205,10 @@ class GameScene extends Phaser.Scene {
         const tip = 5 + Math.floor(this.timeLeft / 6); // faster = bigger tip
         this.money += tip;
         this.moneyText.setText('💵 $' + this.money);
-        this.timeLeft += 8; // reward: more time
+        this.timeLeft += 2; // reward: more time
         this.timeText.setText('⏱ ' + this.timeLeft);
         if (this.timeLeft > 10) this.timeText.setColor('#ffffff');
-        this.flash('+$' + tip + ' & +8s!', '#7cf28a');
+        this.flash('+$' + tip + ' & +2s!', '#7cf28a');
         this.placePickup();
       }
     }
