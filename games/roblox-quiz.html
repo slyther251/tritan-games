@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Roblox Quiz</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+const W = 800, H = 600;
+
+const QUESTIONS = [
+  { q: "What shape is a classic Robloxian's head?", a: ["A cube / block", "A sphere", "A pyramid", "A cylinder"], correct: 0 },
+  { q: "What is Roblox's in-game money called?", a: ["Coins", "Robux", "Gems", "Tickets"], correct: 1 },
+  { q: "In Adopt Me!, what do players mostly collect?", a: ["Cars", "Pets", "Swords", "Hats"], correct: 1 },
+  { q: "What do you call a Roblox game made by a player?", a: ["An app", "An experience", "A level", "A mod"], correct: 1 },
+  { q: "Tower of Hell is famous for being what kind of game?", a: ["A racing game", "An obby (obstacle course)", "A shooter", "A farming game"], correct: 1 },
+  { q: "What color is the classic Roblox 'noob' shirt?", a: ["Green and brown", "Blue and green", "Red and black", "Purple and pink"], correct: 1 },
+  { q: "In Brookhaven, what do players mostly do?", a: ["Fight dragons", "Role-play everyday life", "Race cars only", "Solve puzzles"], correct: 1 },
+  { q: "What do you tap to make your character jump?", a: ["Spacebar", "Enter key", "Shift key", "Tab key"], correct: 0 },
+  { q: "Blox Fruits is a game about being a...", a: ["Chef", "Pirate/fighter", "Farmer", "Race car driver"], correct: 1 },
+  { q: "What is it called when you customize your Roblox character?", a: ["Your avatar", "Your robot", "Your pet", "Your map"], correct: 0 }
+];
+
+// ---------- background ----------
+function makeBG(scene) {
+  const g = scene.add.graphics();
+  g.fillStyle(0x1e2a44, 1);
+  g.fillRect(0, 0, W, H);
+  // scattered floating blocks (Roblox studs vibe)
+  const colors = [0xe2231a, 0x00a2ff, 0xf5cd30, 0x2ecc71, 0xff7bd5];
+  const spots = [[80,120],[700,90],[120,480],[680,500],[400,60],[60,300],[740,300],[400,540]];
+  spots.forEach((s, i) => {
+    const c = colors[i % colors.length];
+    g.fillStyle(c, 0.25);
+    g.fillRoundedRect(s[0]-24, s[1]-24, 48, 48, 8);
+    g.fillStyle(0xffffff, 0.12);
+    g.fillCircle(s[0]-10, s[1]-10, 5);
+    g.fillCircle(s[0]+10, s[1]-10, 5);
+  });
+}
+
+// ---------- Title ----------
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+  create() {
+    makeBG(this);
+    const box = this.add.graphics();
+    box.fillStyle(0x000000, 0.5);
+    box.fillRoundedRect(120, 120, 560, 300, 24);
+
+    this.add.text(W / 2, 180, '🎮 ROBLOX QUIZ 🧠', {
+      fontSize: '42px', fontFamily: 'Arial', color: '#f5cd30', fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    this.add.text(W / 2, 265,
+      '10 questions about Roblox!\nClick the answer you think is right.\n\nFaster answers = more points.\nYou have 12 seconds per question!',
+      { fontSize: '20px', fontFamily: 'Arial', color: '#ffffff', align: 'center', lineSpacing: 8 }
+    ).setOrigin(0.5);
+
+    const prompt = this.add.text(W / 2, 375, 'Click to Start', {
+      fontSize: '28px', fontFamily: 'Arial', color: '#2ecc71', fontStyle: 'bold'
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: prompt, alpha: 0.2, duration: 600, yoyo: true, repeat: -1 });
+
+    // ---- switch-quiz button ----
+    const btn = this.add.rectangle(W / 2, 470, 320, 54, 0x9b59ff)
+      .setInteractive({ useHandCursor: true });
+    this.add.text(W / 2, 470, '🚌 Play the Fortnite Quiz →', {
+      fontSize: '20px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold'
+    }).setOrigin(0.5);
+    btn.on('pointerover', () => btn.setScale(1.05));
+    btn.on('pointerout', () => btn.setScale(1));
+    btn.on('pointerdown', () => { window.location.href = 'fortnite-quiz.html'; });
+
+    // start only when clicking empty space (not the button)
+    this.input.on('pointerdown', (p, over) => {
+      if (over.length === 0) this.scene.start('GameScene');
+    });
+  }
+}
+
+// ---------- Game ----------
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+
+  create() {
+    makeBG(this);
+    this.score = 0;
+    this.qIndex = 0;
+    this.locked = false;
+
+    // HUD
+    this.scoreText = this.add.text(14, 12, '⭐ 0', {
+      fontSize: '26px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: 4
+    });
+    this.progText = this.add.text(W - 14, 12, '', {
+      fontSize: '22px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: 4
+    }).setOrigin(1, 0);
+
+    // timer bar
+    this.timerBarBg = this.add.rectangle(W / 2, 60, 600, 16, 0x000000, 0.4);
+    this.timerBar = this.add.rectangle(W / 2 - 300, 60, 600, 16, 0x2ecc71).setOrigin(0, 0.5);
+
+    // question box
+    this.qBox = this.add.graphics();
+    this.qBox.fillStyle(0x000000, 0.45);
+    this.qBox.fillRoundedRect(60, 90, W - 120, 130, 18);
+    this.qText = this.add.text(W / 2, 155, '', {
+      fontSize: '26px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold',
+      align: 'center', wordWrap: { width: W - 160 }
+    }).setOrigin(0.5);
+
+    this.answerObjs = [];
+    this.showQuestion();
+  }
+
+  showQuestion() {
+    this.locked = false;
+    this.timeLeft = 12;
+    const item = QUESTIONS[this.qIndex];
+    this.qText.setText(item.q);
+    this.progText.setText('Q ' + (this.qIndex + 1) + '/' + QUESTIONS.length);
+
+    // reset timer bar
+    this.timerBar.width = 600;
+    this.timerBar.fillColor = 0x2ecc71;
+    if (this.timeEvent) this.timeEvent.remove();
+    this.timeEvent = this.time.addEvent({
+      delay: 100, loop: true, callback: () => {
+        if (this.locked) return;
+        this.timeLeft -= 0.1;
+        this.timerBar.width = Math.max(0, (this.timeLeft / 12) * 600);
+        if (this.timeLeft <= 4) this.timerBar.fillColor = 0xe2231a;
+        else if (this.timeLeft <= 7) this.timerBar.fillColor = 0xf5cd30;
+        if (this.timeLeft <= 0) this.timeUp();
+      }
+    });
+
+    // build answer buttons
+    const btnColors = [0xe2231a, 0x00a2ff, 0xf5cd30, 0x2ecc71];
+    const startY = 270;
+    item.a.forEach((ans, i) => {
+      const y = startY + i * 78;
+      const rect = this.add.rectangle(W / 2, y, 600, 62, btnColors[i])
+        .setInteractive({ useHandCursor: true });
+      const label = this.add.text(W / 2, y, ans, {
+        fontSize: '22px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: 3, align: 'center', wordWrap: { width: 560 }
+      }).setOrigin(0.5);
+
+      rect.on('pointerover', () => { if (!this.locked) rect.setScale(1.04); });
+      rect.on('pointerout', () => rect.setScale(1));
+      rect.on('pointerdown', () => this.pickAnswer(i, rect, label));
+
+      this.answerObjs.push(rect, label);
+    });
+  }
+
+  pickAnswer(i, rect, label) {
+    if (this.locked) return;
+    this.locked = true;
+    const item = QUESTIONS[this.qIndex];
+
+    // highlight correct + wrong
+    this.answerObjs.forEach(o => { if (o.setScale) o.setScale(1); });
+    if (i === item.correct) {
+      const gained = 50 + Math.round(this.timeLeft * 5); // faster = more
+      this.score += gained;
+      this.scoreText.setText('⭐ ' + this.score);
+      rect.fillColor = 0x2ecc71;
+      this.flash('✔ +' + gained, '#2ecc71');
+    } else {
+      rect.fillColor = 0x777777;
+      // reveal the right one
+      const correctRect = this.answerObjs[item.correct * 2];
+      correctRect.fillColor = 0x2ecc71;
+      this.flash('✘ Nope!', '#e2231a');
+    }
+    this.time.delayedCall(1100, () => this.nextQuestion());
+  }
+
+  timeUp() {
+    if (this.locked) return;
+    this.locked = true;
+    const item = QUESTIONS[this.qIndex];
+    const correctRect = this.answerObjs[item.correct * 2];
+    correctRect.fillColor = 0x2ecc71;
+    this.flash("⏰ Time's up!", '#e2231a');
+    this.time.delayedCall(1100, () => this.nextQuestion());
+  }
+
+  flash(msg, color) {
+    const t = this.add.text(W / 2, 240, msg, {
+      fontSize: '30px', fontFamily: 'Arial', color: color, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: 5
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: t, y: 210, alpha: 0, duration: 1000, onComplete: () => t.destroy() });
+  }
+
+  nextQuestion() {
+    this.answerObjs.forEach(o => o.destroy());
+    this.answerObjs = [];
+    this.qIndex++;
+    if (this.qIndex >= QUESTIONS.length) {
+      if (this.timeEvent) this.timeEvent.remove();
+      this.scene.start('GameOverScene', { score: this.score });
+    } else {
+      this.showQuestion();
+    }
+  }
+}
+
+// ---------- Game Over ----------
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  create(data) {
+    makeBG(this);
+    const box = this.add.graphics();
+    box.fillStyle(0x000000, 0.55);
+    box.fillRoundedRect(160, 150, 480, 300, 24);
+
+    let rank = 'Roblox Rookie';
+    if (data.score >= 700) rank = 'Roblox LEGEND! 🏆';
+    else if (data.score >= 450) rank = 'Roblox Pro! 🔥';
+    else if (data.score >= 200) rank = 'Roblox Fan! 😎';
+
+    this.add.text(W / 2, 210, 'Quiz Complete! 🎉', {
+      fontSize: '36px', fontFamily: 'Arial', color: '#f5cd30', fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    this.add.text(W / 2, 285, '⭐ ' + data.score + ' points', {
+      fontSize: '40px', fontFamily: 'Arial', color: '#2ecc71', fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    this.add.text(W / 2, 340, rank, {
+      fontSize: '26px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    const prompt = this.add.text(W / 2, 405, 'Click to Play Again', {
+      fontSize: '24px', fontFamily: 'Arial', color: '#00a2ff', fontStyle: 'bold'
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: prompt, alpha: 0.2, duration: 600, yoyo: true, repeat: -1 });
+
+    this.input.once('pointerdown', () => this.scene.start('GameScene'));
+  }
+}
+
+const config = {
+  type: Phaser.AUTO,
+  width: W,
+  height: H,
+  physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+  scene: [TitleScene, GameScene, GameOverScene]
+};
+
+const game = new Phaser.Game(config);
+</script>
+</body>
+</html>

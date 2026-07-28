@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Fortnite Quiz</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+const W = 800, H = 600;
+
+const QUESTIONS = [
+  { q: "How many players are in a classic Battle Royale match?", a: ["100", "50", "20", "10"], correct: 0 },
+  { q: "What do you build with in Fortnite?", a: ["Wood, brick, and metal", "Only stone", "Gold bars", "Ice blocks"], correct: 0 },
+  { q: "What is the storm circle also called?", a: ["The eye", "The zone", "The dome", "The ring of fire"], correct: 1 },
+  { q: "What's the last player or team standing called?", a: ["Winner Winner", "Victory Royale", "Game Over", "Top Score"], correct: 1 },
+  { q: "What do you use to glide down when you jump from the bus?", a: ["A parachute/glider", "A jetpack", "A balloon", "Wings"], correct: 0 },
+  { q: "What flies across the map at the start of a match?", a: ["Battle Bus", "A rocket", "A plane", "A dragon"], correct: 0 },
+  { q: "What is Fortnite's in-game money called?", a: ["Robux", "V-Bucks", "Coins", "Gold"], correct: 1 },
+  { q: "A costume or outfit in Fortnite is called a...", a: ["Skin", "Suit", "Shell", "Kit"], correct: 0 },
+  { q: "What do you collect to build things?", a: ["Materials/mats", "Batteries", "Fuel", "Seeds"], correct: 0 },
+  { q: "What's a special dance move in Fortnite called?", a: ["An emote", "A combo", "A spell", "A jump"], correct: 0 }
+];
+
+// ---------- background ----------
+function makeBG(scene) {
+  const g = scene.add.graphics();
+  // purple-to-blue Fortnite night sky
+  g.fillStyle(0x2b1055, 1);
+  g.fillRect(0, 0, W, H / 2);
+  g.fillStyle(0x1b3a7a, 1);
+  g.fillRect(0, H / 2, W, H / 2);
+  // scattered glowing dots (loot vibe)
+  const colors = [0xffb300, 0x9b59ff, 0x00e0ff, 0xff5ea8, 0x7cf28a];
+  const spots = [[80,120],[700,90],[120,480],[680,500],[400,60],[60,300],[740,300],[400,540]];
+  spots.forEach((s, i) => {
+    const c = colors[i % colors.length];
+    g.fillStyle(c, 0.22);
+    g.fillCircle(s[0], s[1], 26);
+    g.fillStyle(0xffffff, 0.15);
+    g.fillCircle(s[0], s[1], 8);
+  });
+}
+
+// ---------- Title ----------
+class TitleScene extends Phaser.Scene {
+  constructor() { super('TitleScene'); }
+  create() {
+    makeBG(this);
+    const box = this.add.graphics();
+    box.fillStyle(0x000000, 0.5);
+    box.fillRoundedRect(120, 120, 560, 300, 24);
+
+    this.add.text(W / 2, 180, '🚌 FORTNITE QUIZ 🏆', {
+      fontSize: '40px', fontFamily: 'Arial', color: '#ffb300', fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    this.add.text(W / 2, 265,
+      '10 questions about Fortnite!\nClick the answer you think is right.\n\nFaster answers = more points.\nYou have 12 seconds per question!',
+      { fontSize: '20px', fontFamily: 'Arial', color: '#ffffff', align: 'center', lineSpacing: 8 }
+    ).setOrigin(0.5);
+
+    const prompt = this.add.text(W / 2, 375, 'Click to Start', {
+      fontSize: '28px', fontFamily: 'Arial', color: '#7cf28a', fontStyle: 'bold'
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: prompt, alpha: 0.2, duration: 600, yoyo: true, repeat: -1 });
+
+    // ---- switch-quiz button ----
+    const btn = this.add.rectangle(W / 2, 470, 320, 54, 0xe2231a)
+      .setInteractive({ useHandCursor: true });
+    const btnLabel = this.add.text(W / 2, 470, '🎮 Play the Roblox Quiz →', {
+      fontSize: '20px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold'
+    }).setOrigin(0.5);
+    btn.on('pointerover', () => btn.setScale(1.05));
+    btn.on('pointerout', () => btn.setScale(1));
+    btn.on('pointerdown', () => { window.location.href = 'roblox-quiz.html'; });
+
+    this.input.keyboard.on('keydown-SPACE', () => this.scene.start('GameScene'));
+    // start only when clicking empty space (not the button)
+    this.input.on('pointerdown', (p, over) => {
+      if (over.length === 0) this.scene.start('GameScene');
+    });
+  }
+}
+
+// ---------- Game ----------
+class GameScene extends Phaser.Scene {
+  constructor() { super('GameScene'); }
+
+  create() {
+    makeBG(this);
+    this.score = 0;
+    this.qIndex = 0;
+    this.locked = false;
+
+    this.scoreText = this.add.text(14, 12, '⭐ 0', {
+      fontSize: '26px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: 4
+    });
+    this.progText = this.add.text(W - 14, 12, '', {
+      fontSize: '22px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: 4
+    }).setOrigin(1, 0);
+
+    this.timerBarBg = this.add.rectangle(W / 2, 60, 600, 16, 0x000000, 0.4);
+    this.timerBar = this.add.rectangle(W / 2 - 300, 60, 600, 16, 0x7cf28a).setOrigin(0, 0.5);
+
+    this.qBox = this.add.graphics();
+    this.qBox.fillStyle(0x000000, 0.45);
+    this.qBox.fillRoundedRect(60, 90, W - 120, 130, 18);
+    this.qText = this.add.text(W / 2, 155, '', {
+      fontSize: '26px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold',
+      align: 'center', wordWrap: { width: W - 160 }
+    }).setOrigin(0.5);
+
+    this.answerObjs = [];
+    this.showQuestion();
+  }
+
+  showQuestion() {
+    this.locked = false;
+    this.timeLeft = 12;
+    const item = QUESTIONS[this.qIndex];
+    this.qText.setText(item.q);
+    this.progText.setText('Q ' + (this.qIndex + 1) + '/' + QUESTIONS.length);
+
+    this.timerBar.width = 600;
+    this.timerBar.fillColor = 0x7cf28a;
+    if (this.timeEvent) this.timeEvent.remove();
+    this.timeEvent = this.time.addEvent({
+      delay: 100, loop: true, callback: () => {
+        if (this.locked) return;
+        this.timeLeft -= 0.1;
+        this.timerBar.width = Math.max(0, (this.timeLeft / 12) * 600);
+        if (this.timeLeft <= 4) this.timerBar.fillColor = 0xe2231a;
+        else if (this.timeLeft <= 7) this.timerBar.fillColor = 0xffb300;
+        if (this.timeLeft <= 0) this.timeUp();
+      }
+    });
+
+    const btnColors = [0x9b59ff, 0x00a2ff, 0xffb300, 0x2ecc71];
+    const startY = 270;
+    item.a.forEach((ans, i) => {
+      const y = startY + i * 78;
+      const rect = this.add.rectangle(W / 2, y, 600, 62, btnColors[i])
+        .setInteractive({ useHandCursor: true });
+      const label = this.add.text(W / 2, y, ans, {
+        fontSize: '22px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold',
+        stroke: '#000000', strokeThickness: 3, align: 'center', wordWrap: { width: 560 }
+      }).setOrigin(0.5);
+
+      rect.on('pointerover', () => { if (!this.locked) rect.setScale(1.04); });
+      rect.on('pointerout', () => rect.setScale(1));
+      rect.on('pointerdown', () => this.pickAnswer(i, rect, label));
+
+      this.answerObjs.push(rect, label);
+    });
+  }
+
+  pickAnswer(i, rect, label) {
+    if (this.locked) return;
+    this.locked = true;
+    const item = QUESTIONS[this.qIndex];
+
+    this.answerObjs.forEach(o => { if (o.setScale) o.setScale(1); });
+    if (i === item.correct) {
+      const gained = 50 + Math.round(this.timeLeft * 5);
+      this.score += gained;
+      this.scoreText.setText('⭐ ' + this.score);
+      rect.fillColor = 0x2ecc71;
+      this.flash('✔ +' + gained, '#7cf28a');
+    } else {
+      rect.fillColor = 0x777777;
+      const correctRect = this.answerObjs[item.correct * 2];
+      correctRect.fillColor = 0x2ecc71;
+      this.flash('✘ Nope!', '#e2231a');
+    }
+    this.time.delayedCall(1100, () => this.nextQuestion());
+  }
+
+  timeUp() {
+    if (this.locked) return;
+    this.locked = true;
+    const item = QUESTIONS[this.qIndex];
+    const correctRect = this.answerObjs[item.correct * 2];
+    correctRect.fillColor = 0x2ecc71;
+    this.flash("⏰ Time's up!", '#e2231a');
+    this.time.delayedCall(1100, () => this.nextQuestion());
+  }
+
+  flash(msg, color) {
+    const t = this.add.text(W / 2, 240, msg, {
+      fontSize: '30px', fontFamily: 'Arial', color: color, fontStyle: 'bold',
+      stroke: '#000000', strokeThickness: 5
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: t, y: 210, alpha: 0, duration: 1000, onComplete: () => t.destroy() });
+  }
+
+  nextQuestion() {
+    this.answerObjs.forEach(o => o.destroy());
+    this.answerObjs = [];
+    this.qIndex++;
+    if (this.qIndex >= QUESTIONS.length) {
+      if (this.timeEvent) this.timeEvent.remove();
+      this.scene.start('GameOverScene', { score: this.score });
+    } else {
+      this.showQuestion();
+    }
+  }
+}
+
+// ---------- Game Over ----------
+class GameOverScene extends Phaser.Scene {
+  constructor() { super('GameOverScene'); }
+  create(data) {
+    makeBG(this);
+    const box = this.add.graphics();
+    box.fillStyle(0x000000, 0.55);
+    box.fillRoundedRect(160, 150, 480, 300, 24);
+
+    let rank = 'Fortnite Rookie';
+    if (data.score >= 700) rank = 'Victory Royale! 🏆';
+    else if (data.score >= 450) rank = 'Fortnite Pro! 🔥';
+    else if (data.score >= 200) rank = 'Fortnite Fan! 😎';
+
+    this.add.text(W / 2, 210, 'Quiz Complete! 🎉', {
+      fontSize: '36px', fontFamily: 'Arial', color: '#ffb300', fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    this.add.text(W / 2, 285, '⭐ ' + data.score + ' points', {
+      fontSize: '40px', fontFamily: 'Arial', color: '#7cf28a', fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    this.add.text(W / 2, 340, rank, {
+      fontSize: '26px', fontFamily: 'Arial', color: '#ffffff', fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    const prompt = this.add.text(W / 2, 405, 'Click to Play Again', {
+      fontSize: '24px', fontFamily: 'Arial', color: '#00a2ff', fontStyle: 'bold'
+    }).setOrigin(0.5);
+    this.tweens.add({ targets: prompt, alpha: 0.2, duration: 600, yoyo: true, repeat: -1 });
+
+    this.input.once('pointerdown', () => this.scene.start('GameScene'));
+  }
+}
+
+const config = {
+  type: Phaser.AUTO,
+  width: W,
+  height: H,
+  physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+  scene: [TitleScene, GameScene, GameOverScene]
+};
+
+const game = new Phaser.Game(config);
+</script>
+</body>
+</html>
