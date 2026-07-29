@@ -592,37 +592,56 @@ function openGame(title, emoji, bg, file) {
 }
 function closeGame() { document.getElementById('gameOverlay').classList.remove('active'); }
 
-/* ---------------- COMMENTS ---------------- */
+/* ---------------- COMMENTS (shared via Supabase) ---------------- */
+const SUPA_URL = 'https://rmhnnbhhtahdeegwrxhw.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtaG5uYmhodGFoZGVlZ3dyeGh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyNzk5MDEsImV4cCI6MjEwMDg1NTkwMX0.C-UEN-SyrpA0457cu8QwklN8l20TgaHgGSjJebl82Ug';
 let currentGameKey = '';
-function getComments() { try { return JSON.parse(localStorage.getItem('tritanComments')) || {}; } catch(e) { return {}; } }
-function saveComments(c) { localStorage.setItem('tritanComments', JSON.stringify(c)); }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-function renderComments() {
+async function renderComments() {
   const box = document.getElementById('commentList');
-  const list = getComments()[currentGameKey] || [];
-  if (!list.length) {
-    box.innerHTML = '<div style="color:#9fd8ff;font-size:13px;padding:4px 0">No comments yet — be the first!</div>';
-    return;
+  const key = currentGameKey;
+  box.innerHTML = '<div style="color:#9fd8ff;font-size:13px;padding:4px 0">Loading comments...</div>';
+  try {
+    const res = await fetch(`${SUPA_URL}/rest/v1/comments?game_key=eq.${encodeURIComponent(key)}&select=username,text&order=created_at.asc`, {
+      headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY }
+    });
+    const list = await res.json();
+    if (key !== currentGameKey) return; // user switched games while loading
+    if (!Array.isArray(list) || !list.length) {
+      box.innerHTML = '<div style="color:#9fd8ff;font-size:13px;padding:4px 0">No comments yet — be the first!</div>';
+      return;
+    }
+    box.innerHTML = list.map(c =>
+      `<div style="background:rgba(255,255,255,0.08);border-radius:10px;padding:8px 10px;margin-bottom:6px">
+        <div style="color:#ffe14d;font-weight:800;font-size:13px">${escapeHtml(c.username)}</div>
+        <div style="font-size:14px;word-break:break-word">${escapeHtml(c.text)}</div>
+      </div>`).join('');
+    box.scrollTop = box.scrollHeight;
+  } catch (e) {
+    box.innerHTML = '<div style="color:#ff9f9f;font-size:13px;padding:4px 0">Couldn\'t load comments. Try again!</div>';
   }
-  box.innerHTML = list.map(c =>
-    `<div style="background:rgba(255,255,255,0.08);border-radius:10px;padding:8px 10px;margin-bottom:6px">
-      <div style="color:#ffe14d;font-weight:800;font-size:13px">${escapeHtml(c.user)}</div>
-      <div style="font-size:14px;word-break:break-word">${escapeHtml(c.text)}</div>
-    </div>`).join('');
 }
-function postComment() {
+async function postComment() {
   const input = document.getElementById('commentInput');
   const text = (input.value || '').trim();
   if (!text) return;
   const acct = getAccount();
   const name = acct ? acct.username : 'Guest';
-  const all = getComments();
-  if (!all[currentGameKey]) all[currentGameKey] = [];
-  all[currentGameKey].push({ user: name, text: text });
-  saveComments(all);
-  input.value = '';
-  renderComments();
-  document.getElementById('commentList').scrollTop = 999999;
+  input.disabled = true;
+  try {
+    await fetch(`${SUPA_URL}/rest/v1/comments`, {
+      method: 'POST',
+      headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ game_key: currentGameKey, username: name, text: text })
+    });
+    input.value = '';
+    await renderComments();
+  } catch (e) {
+    input.value = text; // keep their words so they don't lose them
+  } finally {
+    input.disabled = false;
+    input.focus();
+  }
 }
 
 /* ---------------- SAMPLE GAME CARDS ---------------- */
