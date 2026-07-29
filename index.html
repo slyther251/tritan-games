@@ -340,6 +340,14 @@
     <p id="gameMsg">You're in! Hit Play to jump into the game!</p>
     <a id="playLink" class="btn secondary" style="margin-top:6px;display:inline-block;text-decoration:none" href="#">▶ Play</a>
 
+    <div id="ratingSection" style="margin-top:18px;text-align:left;border-top:2px solid rgba(255,225,77,0.3);padding-top:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="color:#ffe14d;font-weight:800;font-size:16px">⭐ Rate this Game</div>
+        <div id="ratingAvg" style="color:#7cf28a;font-weight:800;font-size:15px">—</div>
+      </div>
+      <div id="ratingButtons" style="display:flex;gap:4px;flex-wrap:wrap"></div>
+    </div>
+
     <div id="commentSection" style="margin-top:18px;text-align:left;border-top:2px solid rgba(255,225,77,0.3);padding-top:12px">
       <div style="color:#ffe14d;font-weight:800;font-size:16px;margin-bottom:8px">💬 Comments</div>
       <div id="commentList" style="max-height:150px;overflow-y:auto;margin-bottom:8px"></div>
@@ -589,6 +597,7 @@ function openGame(title, emoji, bg, file) {
   }
   currentGameKey = title;
   renderComments();
+  renderRating();
   document.getElementById('gameOverlay').classList.add('active');
 }
 function closeGame() { document.getElementById('gameOverlay').classList.remove('active'); }
@@ -659,6 +668,70 @@ async function postComment() {
     input.disabled = false;
     input.focus();
   }
+}
+
+/* ---------------- RATINGS (shared via Supabase) ---------------- */
+function getRaterKey() {
+  const acct = getAccount();
+  if (acct) return 'u:' + acct.username;
+  let id = localStorage.getItem('tritanGuestId');
+  if (!id) { id = 'g:' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('tritanGuestId', id); }
+  return id;
+}
+function getMyRating(key) {
+  try { return (JSON.parse(localStorage.getItem('tritanMyRatings')) || {})[key]; } catch (e) { return null; }
+}
+function setMyRating(key, val) {
+  let all;
+  try { all = JSON.parse(localStorage.getItem('tritanMyRatings')) || {}; } catch (e) { all = {}; }
+  all[key] = val;
+  localStorage.setItem('tritanMyRatings', JSON.stringify(all));
+}
+async function renderRating() {
+  const key = currentGameKey;
+  const avgEl = document.getElementById('ratingAvg');
+  const btnBox = document.getElementById('ratingButtons');
+  avgEl.textContent = '...';
+  btnBox.innerHTML = '';
+  let avgRow = null;
+  try {
+    const res = await fetch(`${SUPA_URL}/rest/v1/ratings?game_key=eq.${encodeURIComponent(key)}&select=rating`, {
+      headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY }
+    });
+    const rows = await res.json();
+    if (key !== currentGameKey) return;
+    avgRow = Array.isArray(rows) ? rows : [];
+    if (avgRow.length) {
+      const avg = avgRow.reduce((s, r) => s + r.rating, 0) / avgRow.length;
+      avgEl.textContent = `${avg.toFixed(1)} / 10 (${avgRow.length} rating${avgRow.length === 1 ? '' : 's'})`;
+    } else {
+      avgEl.textContent = 'No ratings yet';
+    }
+  } catch (e) {
+    avgEl.textContent = '—';
+  }
+  const myRating = getMyRating(key);
+  for (let i = 1; i <= 10; i++) {
+    const b = document.createElement('button');
+    b.textContent = i;
+    b.className = 'account-btn';
+    b.style.cssText = 'padding:6px 10px;font-size:13px;min-width:32px;' +
+      (i === myRating ? 'background:linear-gradient(180deg,#4fd0ff,#1e93d6);color:#fff' : '');
+    b.onclick = () => submitRating(i);
+    btnBox.appendChild(b);
+  }
+}
+async function submitRating(val) {
+  const key = currentGameKey;
+  setMyRating(key, val);
+  try {
+    await fetch(`${SUPA_URL}/rest/v1/ratings?on_conflict=game_key,rater_key`, {
+      method: 'POST',
+      headers: { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ game_key: key, rater_key: getRaterKey(), rating: val })
+    });
+  } catch (e) { /* keep the local pick even if the network hiccups */ }
+  renderRating();
 }
 
 /* ---------------- SAMPLE GAME CARDS ---------------- */
