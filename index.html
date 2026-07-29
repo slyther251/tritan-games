@@ -347,6 +347,7 @@
         <input id="commentInput" type="text" maxlength="140" placeholder="Say something nice..." style="margin-bottom:0;flex:1" onkeydown="if(event.key==='Enter')postComment()" />
         <button class="account-btn" style="padding:10px 16px" onclick="postComment()">Post</button>
       </div>
+      <div id="commentWarning" style="color:#ff8f8f;font-size:13px;margin-top:6px;display:none">That comment isn't allowed here — try saying it a different way!</div>
     </div>
 
     <br><button class="close" onclick="closeGame()">Back to games</button>
@@ -597,6 +598,16 @@ const SUPA_URL = 'https://rmhnnbhhtahdeegwrxhw.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtaG5uYmhodGFoZGVlZ3dyeGh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyNzk5MDEsImV4cCI6MjEwMDg1NTkwMX0.C-UEN-SyrpA0457cu8QwklN8l20TgaHgGSjJebl82Ug';
 let currentGameKey = '';
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+const BAD_WORDS = [
+  'damn','hell','crap','ass','asshole','bitch','bastard','shit','fuck','piss',
+  'dick','cock','pussy','cunt','slut','whore','fag','faggot','retard','retarded',
+  'nigger','nigga','rape','kill yourself','kys','suicide'
+];
+function containsBadWord(text) {
+  const clean = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  return BAD_WORDS.some(w => clean.includes(w));
+}
 async function renderComments() {
   const box = document.getElementById('commentList');
   const key = currentGameKey;
@@ -623,8 +634,14 @@ async function renderComments() {
 }
 async function postComment() {
   const input = document.getElementById('commentInput');
+  const warning = document.getElementById('commentWarning');
   const text = (input.value || '').trim();
+  warning.style.display = 'none';
   if (!text) return;
+  if (containsBadWord(text)) {
+    warning.style.display = 'block';
+    return;
+  }
   const acct = getAccount();
   const name = acct ? acct.username : 'Guest';
   input.disabled = true;
