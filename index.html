@@ -339,6 +339,16 @@
     <h2 id="gameTitle">Game</h2>
     <p id="gameMsg">You're in! Hit Play to jump into the game!</p>
     <a id="playLink" class="btn secondary" style="margin-top:6px;display:inline-block;text-decoration:none" href="#">▶ Play</a>
+
+    <div id="commentSection" style="margin-top:18px;text-align:left;border-top:2px solid rgba(255,225,77,0.3);padding-top:12px">
+      <div style="color:#ffe14d;font-weight:800;font-size:16px;margin-bottom:8px">💬 Comments</div>
+      <div id="commentList" style="max-height:150px;overflow-y:auto;margin-bottom:8px"></div>
+      <div style="display:flex;gap:6px">
+        <input id="commentInput" type="text" maxlength="140" placeholder="Say something nice..." style="margin-bottom:0;flex:1" onkeydown="if(event.key==='Enter')postComment()" />
+        <button class="account-btn" style="padding:10px 16px" onclick="postComment()">Post</button>
+      </div>
+    </div>
+
     <br><button class="close" onclick="closeGame()">Back to games</button>
   </div>
 </div>
@@ -576,9 +586,44 @@ function openGame(title, emoji, bg, file) {
     play.style.display = 'none';
     msg.textContent = "Nice, your game is saved! Ask Claude in the workshop to build it with /game.";
   }
+  currentGameKey = title;
+  renderComments();
   document.getElementById('gameOverlay').classList.add('active');
 }
 function closeGame() { document.getElementById('gameOverlay').classList.remove('active'); }
+
+/* ---------------- COMMENTS ---------------- */
+let currentGameKey = '';
+function getComments() { try { return JSON.parse(localStorage.getItem('tritanComments')) || {}; } catch(e) { return {}; } }
+function saveComments(c) { localStorage.setItem('tritanComments', JSON.stringify(c)); }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function renderComments() {
+  const box = document.getElementById('commentList');
+  const list = getComments()[currentGameKey] || [];
+  if (!list.length) {
+    box.innerHTML = '<div style="color:#9fd8ff;font-size:13px;padding:4px 0">No comments yet — be the first!</div>';
+    return;
+  }
+  box.innerHTML = list.map(c =>
+    `<div style="background:rgba(255,255,255,0.08);border-radius:10px;padding:8px 10px;margin-bottom:6px">
+      <div style="color:#ffe14d;font-weight:800;font-size:13px">${escapeHtml(c.user)}</div>
+      <div style="font-size:14px;word-break:break-word">${escapeHtml(c.text)}</div>
+    </div>`).join('');
+}
+function postComment() {
+  const input = document.getElementById('commentInput');
+  const text = (input.value || '').trim();
+  if (!text) return;
+  const acct = getAccount();
+  const name = acct ? acct.username : 'Guest';
+  const all = getComments();
+  if (!all[currentGameKey]) all[currentGameKey] = [];
+  all[currentGameKey].push({ user: name, text: text });
+  saveComments(all);
+  input.value = '';
+  renderComments();
+  document.getElementById('commentList').scrollTop = 999999;
+}
 
 /* ---------------- SAMPLE GAME CARDS ---------------- */
 const thumbs = ['🎮','🕹️','👾','🚀','⚽','🏰','🐉','🏎️','🧩','⚔️','🎯','🌊'];
